@@ -338,7 +338,11 @@ class ScopedReader:
                     fail("READBACK_UNVERIFIED", "回读消息格式或会话身份异常。")
                 native = str(message.get("server_id", ""))
                 if re.fullmatch(r"[0-9]{1,40}", native) and int(native) > 0:
-                    output.append({"chatId": self.chat_id, "nativeId": native, "outbound": message.get("sender") == "我", "textSha256": shared.sha(message["content"])})
+                    sender = message.get("sender_username")
+                    if not isinstance(sender, str) or not 1 <= len(sender) <= 200 or re.search(r"[\x00-\x1f\x7f-\x9f]", sender):
+                        sender = None
+                    # 保留原始账号、类型和时间证据；昵称“我”不能代替原生发送方身份。
+                    output.append({"chatId": self.chat_id, "nativeId": native, "outbound": message.get("sender") == "我", "textSha256": shared.sha(message["content"]), "senderUsername": sender, "localType": message.get("local_type") if isinstance(message.get("local_type"), str) else None, "timestamp": message["timestamp"]})
             return output
 
 

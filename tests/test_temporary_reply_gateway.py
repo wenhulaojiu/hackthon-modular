@@ -1,6 +1,7 @@
 """临时网关纯合成测试；不连接微信、不截图、不读真实聊天或密钥。"""
 
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -103,6 +105,94 @@ class ScanVision(Vision):
                         color = (15, 180, 40)
                 pixels.append(color)
         return GridImage(right - left, bottom - top, pixels, "input" if rectangle == RECIPE["inputRect"] else "header")
+
+
+class ScopedReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="kexu-scoped-reader-test-")
+        self.root = Path(self.temp.name).resolve()
+        self.private = self.root / ".local-wechat"
+        self.private.mkdir()
+        self.database = self.root / "synthetic" / "db_storage"
+        self.database.mkdir(parents=True)
+        self.exporter = self.root / "synthetic-exporter"
+        script = self.exporter / "scripts" / "export_wechat.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("# 合成导出脚本，不会执行。\n", encoding="utf-8")
+        for name, value in {
+            "config.json": {"dbDir": str(self.database), "exporterRoot": str(self.exporter), "pythonPath": sys.executable},
+            "accounts.json": {"version": 1, "activeId": "legacy", "revision": 1, "accounts": [{"id": "legacy", "dbDir": str(self.database)}]},
+        }.items():
+            (self.private / name).write_text(json.dumps(value), encoding="utf-8")
+        (self.private / "temporary-reply-gateway" / "legacy").mkdir(parents=True)
+        self.start, self.end = 1800000000, 1800000010
+        self.message = {"chat_username": RECIPE["chatId"], "timestamp": self.start + 1, "content": "合成固定标记", "server_id": "987654321", "sender": "我", "sender_username": "wxid_synthetic_self", "local_type": "1"}
+        with patch.object(gateway_module.shared, "EXPORTER_SHA256", hashlib.sha256(script.read_bytes().replace(b"\r\n", b"\n")).hexdigest()):
+            self.reader = gateway_module.ScopedReader(gateway_module.shared.binding(self.root, "legacy@1"), RECIPE["chatId"])
+
+    def tearDown(self):
+        # 清理范围严格限于本测试创建的合成目录。
+        self.assertTrue(self.root.name.startswith("kexu-scoped-reader-test-"))
+        self.assertEqual(self.root.parent, Path(tempfile.gettempdir()).resolve())
+        self.temp.cleanup()
+
+    def export_result(self, command, **_kwargs):
+        self.assertEqual(command[command.index("--chat") + 1], RECIPE["chatId"])
+        self.assertEqual(command[command.index("--db-dir") + 1], str(self.database))
+        folder = Path(command[command.index("--output-root") + 1])
+        metadata = {"chat_username": RECIPE["chatId"], "chat_type": "private", "message_count": 1, "source_modified": False, "keys_saved": False, "plaintext_database_saved": False, "range_start_inclusive": gateway_module.iso(self.start), "range_end_exclusive": gateway_module.iso(self.end)}
+        raw = json.dumps({"metadata": metadata, "messages": [self.message]}, ensure_ascii=False).encode("utf-8")
+        plain = "合成导出文本".encode("utf-8")
+        json_file, text_file, validation_file = folder / "messages.json", folder / "messages.txt", folder / "validation.json"
+        json_file.write_bytes(raw)
+        text_file.write_bytes(plain)
+        validation = {"status": "passed", "message_count": 1, "json_sha256": hashlib.sha256(raw).hexdigest(), "text_sha256": hashlib.sha256(plain).hexdigest(), "json_bytes": len(raw), "text_bytes": len(plain)}
+        validation_file.write_text(json.dumps(validation), encoding="utf-8")
+        summary = {"status": "complete", "chat_username": RECIPE["chatId"], "messages": 1, "json_file": str(json_file), "text_file": str(text_file), "validation_file": str(validation_file)}
+        return gateway_module.subprocess.CompletedProcess(command, 0, stdout=json.dumps(summary).encode("utf-8"))
+
+    def read(self):
+        with patch.object(gateway_module.subprocess, "run", side_effect=self.export_result) as run:
+            result = self.reader.read(self.start, self.end)
+            self.assertEqual(run.call_count, 1)
+            return result[0]
+
+    def test_preserves_native_sender_type_and_timestamp_evidence(self):
+        result = self.read()
+        self.assertEqual(result["senderUsername"], "wxid_synthetic_self")
+        self.assertEqual(result["localType"], "1")
+        self.assertEqual(result["timestamp"], self.start + 1)
+        self.assertEqual(result["nativeId"], "987654321")
+        self.assertEqual(result["textSha256"], gateway_module.shared.sha(self.message["content"]))
+        self.assertTrue(result["outbound"])
+
+    def test_nickname_does_not_replace_conflicting_native_sender(self):
+        self.message["sender_username"] = "wxid_synthetic_other"
+        result = self.read()
+        self.assertTrue(result["outbound"])
+        self.assertEqual(result["senderUsername"], "wxid_synthetic_other")
+        self.assertNotEqual(result["senderUsername"], "wxid_synthetic_self")
+
+    def test_missing_or_untyped_optional_evidence_is_none(self):
+        self.message.pop("sender_username")
+        self.message.pop("local_type")
+        result = self.read()
+        self.assertIsNone(result["senderUsername"])
+        self.assertIsNone(result["localType"])
+        self.message["local_type"] = 1
+        self.assertIsNone(self.read()["localType"])
+
+    def test_invalid_native_sender_is_not_promoted_to_identity(self):
+        for sender in (None, "", "x" * 201, "wxid_\x00self", "wxid_\x7fself", "wxid_\x85self", 123):
+            with self.subTest(sender=repr(sender)):
+                self.message["sender_username"] = sender
+                self.assertIsNone(self.read()["senderUsername"])
+
+    def test_missing_timestamp_still_rejects_entire_readback(self):
+        self.message.pop("timestamp")
+        with self.assertRaises(gateway_module.GatewayError) as error:
+            self.read()
+        self.assertEqual(error.exception.code, "READBACK_UNVERIFIED")
 
 
 class GatewayTests(unittest.TestCase):
