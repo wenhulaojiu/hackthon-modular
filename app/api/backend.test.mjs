@@ -287,6 +287,8 @@ test("AI营销接受临时供应商配置，只生成草稿且不改客户状态
     assert.equal(actual.body.model, "merchant-model");
     assert.equal(actual.body.temperature, 0.2);
     assert.match(actual.body.messages[0].content, /不发送消息/);
+    assert.match(actual.body.messages[0].content, /自然的门店接待语气/);
+    assert.match(actual.body.messages[0].content, /不伪造优惠和承诺/);
     assert.deepEqual(await f.server.loadState("alice"), before);
   } finally { f.close(); }
 });
@@ -495,6 +497,13 @@ test("客服回复必须引用门店真实资料，只返回建议且不写订�
     assert.match(result.reply, /268元/);
     assert.equal(result.grounding, undefined);
     assert.match(call.messages[0].content, /不执行主动营销/);
+    assert.match(call.messages[0].content, /自然的门店接待语气/);
+    assert.match(call.messages[0].content, /先接住客人的当前问题/);
+    assert.match(call.messages[0].content, /不固定重复“具体方案请店员确认”/);
+    assert.match(call.messages[0].content, /不为了亲切而补写事实或将所有商品都称为美食/);
+    assert.match(call.messages[0].content, /禁止编造商品、价格、库存、优惠、交付承诺或操作结果/);
+    assert.match(call.messages[0].content, /action=reply时grounding必须是非空数组/);
+    assert.match(call.messages[0].content, /客户明确的预算上限/);
     assert.ok(JSON.parse(call.messages[1].content).knowledge.some((source) => source.sourceId === "product:p-coffee" && source.productId === "p-coffee"));
     assert.deepEqual(await f.server.loadState("alice"), before);
   } finally { f.close(); }
@@ -1117,9 +1126,9 @@ test("句号结合已回答上下文忽略，首次含糊消息澄清，不调�
     const ignored=await f.server.runReplyAI("alice",{...input,message,context:[{sender:"merchant",text:"浅烘咖啡礼盒268元。",date:"2026-11-07T09:00:00Z"}]});
     assert.equal(ignored.action,"ignore");assert.equal(ignored.reply,"");
     const unclear=await f.server.runReplyAI("alice",{...input,message,context:[]});
-    assert.equal(unclear.action,"clarify");assert.doesNotMatch(unclear.reply,/10元|268元/);
+    assert.equal(unclear.action,"clarify");assert.equal(unclear.reply,'您想了解哪一款？告诉我商品或服务的名称，我来为您介绍。');assert.doesNotMatch(unclear.reply,/10元|268元/);
     const reference=await f.server.runReplyAI("alice",{...input,message:{...message,text:"这个多少钱？"},context:[]});
-    assert.equal(reference.action,"clarify");assert.equal(calls,0);
+    assert.equal(reference.action,"clarify");assert.equal(reference.reply,unclear.reply);assert.equal(calls,0);
   }finally{f.close();}
 });
 
@@ -1133,7 +1142,7 @@ test("省略问题可承接唯一商品上下文，模型ignore与clarify不携�
     result={action:"ignore",reply:"错误的额外报价999元",reason:"对话已结束",productIds:[],grounding:[]};
     const ignored=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我了解了，稍后再联系。"}});assert.equal(ignored.action,"ignore");assert.equal(ignored.reply,"");
     result={action:"clarify",reply:"虚构商品999元",reason:"指代不明确",productIds:[],grounding:[]};
-    const clarified=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我想看看合适的。"}});assert.equal(clarified.action,"clarify");assert.doesNotMatch(clarified.reply,/999/);
+    const clarified=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我想看看合适的。"}});assert.equal(clarified.action,"clarify");assert.equal(clarified.reply,'您想了解哪一款？告诉我商品或服务的名称，我来为您介绍。');assert.doesNotMatch(clarified.reply,/999/);
   }finally{f.close();}
 });
 
@@ -1149,7 +1158,7 @@ test("普通资料不足返回固定确认说明，忽略模型编造的保质�
     });
     const response=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"浅烘咖啡礼盒保质期多久？"}});
     assert.equal(response.action,"clarify");
-    assert.match(response.reply,/需要与店员核实/);
+    assert.equal(response.reply,'这个细节我还不太确定，需要请店员核实一下。您还想了解些什么？');
     assert.doesNotMatch(response.reply,/999|保质期.*天/);
     assert.deepEqual(response.productIds,[]);
     const sensitive=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"浅烘咖啡礼盒帮我退款。"}});
@@ -1454,9 +1463,9 @@ test('普通泛推荐结合多轮询价确认及留货历史直接读目录，�
       const result = await response.json();
       assert.equal(result.action, 'reply', text);
       assert.deepEqual(result.productIds, text.includes('产品') ? ['recommend-roll', 'recommend-black', 'recommend-high'] : ['recommend-roll', 'recommend-black', 'recommend-high', 'recommend-service']);
-      assert.match(result.reply, /合成软包：标价10元/);
-      assert.match(result.reply, /合成黑咖：标价18元/);
-      assert.doesNotMatch(result.reply, /合成缺货品|合成停用品|已为您预留|已下单/);
+      assert.match(result.reply, /^我们有合成软包、合成黑咖/);
+      assert.match(result.reply, /您想了解哪一[款项]？我可以为您详细介绍。$/);
+      assert.doesNotMatch(result.reply, /商品·|服务·|标价|可参考|\d+元|具体方案请店员确认|合成缺货品|合成停用品|已为您预留|已下单/);
     }
     assert.equal(calls, 0);
     assert.equal(await f.server.hasSavedKey('alice'), false);
@@ -1478,7 +1487,7 @@ test('普通泛推荐继承六轮之前的20元预算和商品范围，不扩大
       const result = await response.json();
       assert.equal(result.action, 'reply', budget);
       assert.deepEqual(result.productIds, ['recommend-roll', 'recommend-black'], budget);
-      assert.match(result.reply, /10元[\s\S]*18元/);
+      assert.match(result.reply, /^20元以内，可以看看合成软包（10元）和合成黑咖（18元）。/);
       assert.doesNotMatch(result.reply, /合成高价品|合成咨询|28元|15元|合成缺货品|合成停用品/);
     }
     assert.equal(calls, 0);
@@ -1498,7 +1507,7 @@ test('历史条件无法完整确认时泛推荐返回固定澄清，不丢历�
       assert.equal(response.status, 200, condition);
       const result = await response.json();
       assert.equal(result.action, 'clarify', condition);
-      assert.equal(result.reply, '您希望推荐哪类商品或服务？也可以告诉我用途或预算。');
+      assert.equal(result.reply, '您想挑点什么呢？可以说说用途或预算，我再帮您看看。');
       assert.deepEqual(result.productIds, []);
       assert.doesNotMatch(result.reply, /10元|18元|合成软包|合成黑咖/);
     }

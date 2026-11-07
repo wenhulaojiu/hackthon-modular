@@ -1,4 +1,4 @@
-export const DEFAULT_WELCOME_MESSAGE = '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。';
+export const DEFAULT_WELCOME_MESSAGE = '您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。';
 export const MAX_WELCOME_LENGTH = 300;
 type WelcomeSettings = { welcomeEnabled?: boolean; welcomeMessage?: string };
 type ShopDetails = { storeName?: string; serviceContent?: string; phone?: string; address?: string; businessHours?: { enabled: boolean; start: string; end: string; days: number[] } };
@@ -25,21 +25,24 @@ function shorten(value: string, limit: number): string {
 function hoursText(hours: ShopDetails['businessHours']): string {
   if (!hours?.enabled || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(hours.start) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(hours.end) || hours.start >= hours.end) return '';
   const days = [1, 2, 3, 4, 5, 6, 0].filter(day => hours.days.includes(day));
-  return days.length ? `营业时间：${days.map(day => `周${['日', '一', '二', '三', '四', '五', '六'][day]}`).join('、')} ${hours.start}–${hours.end}。` : '';
+  return days.length ? `我们在${days.map(day => `周${['日', '一', '二', '三', '四', '五', '六'][day]}`).join('、')} ${hours.start}–${hours.end}营业。` : '';
 }
 
 export function buildWelcomeMessage(details: ShopDetails): string {
   const name = clean(details.storeName), service = clean(details.serviceContent), address = clean(details.address), phone = clean(details.phone), hours = hoursText(details.businessHours);
   if (!name && !service && !address && !phone && !hours) return DEFAULT_WELCOME_MESSAGE;
-  const opening = `您好，欢迎添加${name ? shorten(name, 60) : '本店'}！`, ending = '欢迎告诉我们您的需求。';
+  const opening = name ? `您好，欢迎来到${shorten(name, 60)}！` : '您好，欢迎光临！';
+  const ending = '想了解店里的商品或服务，都可以在这里问我。';
   // 电话必须完整保留；过长且未经校验的联系方式整项省略，不能截成错误号码。
-  const fixed = `${phone && phone.length <= 80 ? `联系电话：${phone}。` : ''}${hours}`;
-  const fields = [{ label: '服务内容：', value: service }, { label: '地址：', value: address }].filter(field => field.value);
+  const fixed = `${phone && phone.length <= 80 ? `需要联系门店的话，可以拨打${phone}。` : ''}${hours}`;
+  const serviceLead = /^(?:本店|店里|我们|这里)/u.test(service) ? '' : /^(?:提供|主营|经营|专注|承接|支持|可)/u.test(service) ? '我们' : '店里有';
+  const fields = [{ lead: serviceLead, value: service }, { lead: '门店在', value: address }].filter(field => field.value);
   let remaining = MAX_WELCOME_LENGTH - opening.length - ending.length - fixed.length;
   const introductions = fields.map((field, index) => {
-    const available = Math.floor(remaining / (fields.length - index)) - field.label.length - 1;
+    const available = Math.floor(remaining / (fields.length - index)) - field.lead.length - 1;
     if (available < 1) return '';
-    const section = `${field.label}${shorten(field.value, available)}。`;
+    const value = shorten(field.value.replace(/[。.!！?？；;]+$/u, ''), available);
+    const section = `${field.lead}${value}。`;
     remaining -= section.length;
     return section;
   }).join('');

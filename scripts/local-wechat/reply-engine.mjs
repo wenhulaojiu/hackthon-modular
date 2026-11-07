@@ -4,7 +4,7 @@ import path from "node:path";
 import { assertAdditiveEnrollment, isEnrollmentChatId } from "./reply-enrollment.mjs";
 import { GenerationError, normalizeGenerationFailure } from "./reply-generation-errors.mjs";
 
-export const DEFAULT_WELCOME_MESSAGE = "您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。";
+export const DEFAULT_WELCOME_MESSAGE = "您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。";
 
 export const DEFAULT_REPLY_SETTINGS = {
   enabled: false, mode: "review", selectedCustomerIds: [], autoEnrollNewContacts: true, welcomeEnabled: true, welcomeMessage: DEFAULT_WELCOME_MESSAGE,

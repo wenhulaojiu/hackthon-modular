@@ -1,6 +1,6 @@
 type Turn = { sender: 'customer' | 'merchant'; text: string; date: string };
 type Incoming = { text: string; date: string };
-export const CLARIFY_REPLY = '您想了解哪款商品或哪项服务？告诉我具体名称或问题，我再为您介绍。';
+export const CLARIFY_REPLY = '您想了解哪一款？告诉我商品或服务的名称，我来为您介绍。';
 const compact = (text: string) => text.normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
 const acknowledgements = new Set(['你好','您好','hi','hello','哈喽','嗨','嗯','嗯嗯','好','好的','行','收到','知道了','谢谢','谢谢你','谢谢您','ok','okay']);
 const lowInformation = (text: string) => !compact(text) || acknowledgements.has(compact(text)) || /^(?:好(?:的)?|谢谢(?:你|您)?|嗯+|收到|知道了)+$/.test(compact(text));

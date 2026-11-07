@@ -156,17 +156,28 @@ export function suggestCatalogReply(products: Product[], messages: Message[], co
   const request = resolveHistoryRequest(preceding, valid, firstRequest);
   if (!request) return null;
   const candidates = valid.filter(product => product.enabled && (request.scope === 'all' || product.type === request.scope) && (!request.other || !mentioned.has(product.id)) && (request.mode !== 'recommend' || product.type !== 'product' || product.stock !== 0) && (request.maxPrice === undefined || typeof product.price === 'number' && Number.isFinite(product.price) && product.price >= 0 && product.price <= request.maxPrice));
-  const prefix = '可参考：';
-  const ending = '具体方案请店员确认。';
-  const rows: string[] = [], ids: string[] = [];
+  // 目录筛选仍只使用结构字段，面向客户时用自然接待语句，不让模型另行改写事实。
+  const describe = (product: Product) => `${product.name}${request.maxPrice === undefined ? '' : `（${product.price}元）`}${product.type === 'product' && product.stock === 0 ? '（暂时售罄）' : ''}`;
+  const join = (items: Product[]) => {
+    const names = items.map(describe);
+    return names.length < 2 ? names.join('') : `${names.slice(0, -1).join('、')}和${names.at(-1)}`;
+  };
+  const render = (items: Product[]) => {
+    const goods = items.filter(product => product.type === 'product');
+    const services = items.filter(product => product.type === 'service');
+    const question = goods.length && !services.length ? '您想了解哪一款？' : '您想了解哪一项？';
+    let opening: string;
+    if (request.maxPrice !== undefined) opening = `${request.maxPrice}元以内，${request.other ? '还' : ''}可以看看${join(items)}`;
+    else if (!goods.length) opening = `我们${request.other ? '还' : ''}提供${join(services)}`;
+    else opening = `我们${request.other ? '还' : ''}有${join(goods)}${services.length ? `，也提供${join(services)}` : ''}`;
+    return `${opening}。${question}我可以为您详细介绍。`;
+  };
+  const selected: Product[] = [];
   for (const product of candidates) {
-    if (rows.length === 6) break;
-    const price = product.price !== null && Number.isFinite(product.price) && product.price >= 0 ? `标价${product.price}元` : '价格需确认';
-    const soldOut = product.type === 'product' && product.stock === 0 ? '（售罄）' : '';
-    const row = `${product.type === 'service' ? '服务' : '商品'}·${product.name}：${price}${soldOut}`;
-    if (`${prefix}\n${[...rows, row].join('\n')}\n${ending}`.length > limit) continue;
-    rows.push(row); ids.push(product.id);
+    if (selected.length === 6) break;
+    if (render([...selected, product]).length > limit) continue;
+    selected.push(product);
   }
-  if (!rows.length) return { action: 'clarify', reply: '当前资料暂不足以完整列出其他项目，请向店员确认或指定名称咨询。', reason: '已启用目录没有符合本次范围且能完整列入字数限制的项目，需店员确认。', productIds: [] };
-  return { action: 'reply', reply: `${prefix}\n${rows.join('\n')}\n${ending}`, reason: `依据已启用目录的name/type/price/stock结构字段生成${request.mode === 'recommend' ? '参考项目' : '目录'}${request.other ? '，排除最近6轮已提及的项目' : ''}；价格为目录标价，具体方案需店员确认。`, productIds: ids };
+  if (!selected.length) return { action: 'clarify', reply: '您想了解哪类商品或服务？告诉我具体需求，我再为您介绍。', reason: '已启用目录没有符合本次范围且能完整列入字数限制的项目，需店员确认。', productIds: [] };
+  return { action: 'reply', reply: render(selected), reason: `依据已启用目录的name/type/price/stock结构字段生成${request.mode === 'recommend' ? '参考项目' : '目录'}${request.other ? '，排除最近6轮已提及的项目' : ''}；仅预算推荐列出目录价格，未承诺库存或具体方案。`, productIds: selected.map(product => product.id) };
 }

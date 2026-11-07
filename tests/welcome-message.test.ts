@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildWelcomeMessage, DEFAULT_WELCOME_MESSAGE, welcomeMessageError, welcomeSettingsFor } from '../app/components/welcome-message.ts';
 
 test('未配置时使用固定默认，明确空串和停用保持商家选择', () => {
-  assert.deepEqual(welcomeSettingsFor(), { enabled: true, message: '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。' });
+  assert.deepEqual(welcomeSettingsFor(), { enabled: true, message: '您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。' });
   assert.deepEqual(welcomeSettingsFor({ welcomeEnabled: false, welcomeMessage: '' }), { enabled: false, message: '' });
   assert.equal(welcomeSettingsFor({ welcomeMessage: '' }).message, '');
   assert.equal(welcomeSettingsFor({ welcomeMessage: '   ' }).message, '   ');
@@ -42,5 +42,23 @@ test('长资料按300字符收束，不截断电话号码或Unicode字符', () =
   assert.ok(text.isWellFormed());
   assert.ok(text.includes('010-00000000'));
   assert.ok(text.includes('…'));
-  assert.ok(text.endsWith('欢迎告诉我们您的需求。'));
+  assert.ok(text.endsWith('想了解店里的商品或服务，都可以在这里问我。'));
+});
+
+
+test('欢迎语把已填店铺资料自然连接，不显示字段标签或编造承诺', () => {
+  const text = buildWelcomeMessage({ storeName: '青禾小店', serviceContent: '提供咖啡和手作体验。', address: '合成街道1号', phone: '010-00000000', businessHours: { enabled: true, start: '09:30', end: '18:00', days: [1, 3] } });
+  assert.equal(text, '您好，欢迎来到青禾小店！我们提供咖啡和手作体验。门店在合成街道1号。需要联系门店的话，可以拨打010-00000000。我们在周一、周三 09:30–18:00营业。想了解店里的商品或服务，都可以在这里问我。');
+  assert.doesNotMatch(text, /服务内容：|地址：|联系电话：|营业时间：|提供提供|。。|已为您|保证|优惠|免费/);
+  assert.match(buildWelcomeMessage({ serviceContent: '现磨咖啡和手作体验' }), /店里有现磨咖啡和手作体验。/);
+  assert.match(buildWelcomeMessage({ serviceContent: '我们提供预约咨询' }), /我们提供预约咨询。/);
+});
+
+test('自然欢迎默认不会替换商家已保存的自定义文案或明确关闭', () => {
+  const custom = '你好呀，这里是我保存的老店铺介绍。';
+  assert.deepEqual(welcomeSettingsFor({ welcomeEnabled: true, welcomeMessage: custom }), { enabled: true, message: custom });
+  assert.deepEqual(welcomeSettingsFor({ welcomeEnabled: false, welcomeMessage: custom }), { enabled: false, message: custom });
+  const text = buildWelcomeMessage({ storeName: '只有店名' });
+  assert.equal(text, '您好，欢迎来到只有店名！想了解店里的商品或服务，都可以在这里问我。');
+  assert.doesNotMatch(text, /门店在|拨打|营业。|店里有/);
 });

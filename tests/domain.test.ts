@@ -41,9 +41,12 @@ test('概览包含时间范围边界，排除范围外与未来交易', () => {
 
 test('JSON 会话以微信号合并，重复导入不重复消息，也不误并同名客户', () => {
   const existing = demoSeed().customers.slice(0, 1);
+  // 演示消息随经营日期变化，导入时间相对初始消息安排，跨日后仍能验证时间排序。
+  const latestSeedDate = existing[0].messages.map(message => message.date).sort().at(-1)!;
+  const newMessageDay = shiftDate(1, latestSeedDate);
   const payload = JSON.stringify({ customers: [
-    { name: existing[0].name, wechatId: existing[0].wechatId, messages: [{ sender: 'customer', content: '同一微信号的新消息', timestamp: '2026-11-07T09:00:00+08:00' }] },
-    { name: existing[0].name, messages: [{ sender: 'customer', content: '同名但没有身份凭据', date: '2026-11-07' }] },
+    { name: existing[0].name, wechatId: existing[0].wechatId, messages: [{ sender: 'customer', content: '同一微信号的新消息', timestamp: `${newMessageDay}T09:00:00+08:00` }] },
+    { name: existing[0].name, messages: [{ sender: 'customer', content: '同名但没有身份凭据', date: newMessageDay }] },
   ] });
   const first = parseChatImport(payload, 'chat.json', existing);
   assert.equal(first.customers.length, 2);

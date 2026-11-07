@@ -11,26 +11,27 @@ const reply = (text: string, context: ReturnType<typeof turn>[] = [], limit = 30
 
 test('完整简单目录问法可直接列出已有商品，不需要模型或描述中的事实', () => {
   for (const text of ['还有什么其他产品', '你们卖什么', '有哪些商品', '有什么产品？', '请问你们卖什么？', '你好，有哪些商品？', '商品有哪些', '你们还有哪些商品呢？']) {
-    const result = reply(text); assert.equal(result?.action, 'reply', text); assert.ok(result.reply.includes('商品·美式咖啡：标价18元')); assert.ok(!result.reply.includes('停用套餐')); assert.ok(!result.reply.includes('服务·'));
+    const result = reply(text); assert.equal(result?.action, 'reply', text); assert.match(result.reply, /^我们(?:还)?有/); assert.ok(result.reply.includes('美式咖啡')); assert.ok(!result.reply.includes('停用套餐')); assert.ok(!result.productIds?.includes('experience'));
+    assert.match(result.reply, /您想了解哪一款？我可以为您详细介绍。$/); assert.doesNotMatch(result.reply, /商品·|服务·|标价|可参考|\d+(?:\.\d+)?元/);
     assert.match(result.reason, /name\/type\/price\/stock/); assert.ok(!result.reply.includes('优惠')); assert.ok(!result.reply.includes('/杯'));
   }
 });
 
 test('服务目录只列服务，服务不套用商品的零库存售罄规则', () => {
   for (const text of ['有什么服务', '你们提供哪些服务项目？', '服务有哪些？']) {
-    const result = reply(text); assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['experience']); assert.match(result.reply, /服务·咖啡体验：标价128元/); assert.ok(!result.reply.includes('售罄'));
+    const result = reply(text); assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['experience']); assert.match(result.reply, /^我们提供咖啡体验。/); assert.match(result.reply, /您想了解哪一项？我可以为您详细介绍。$/); assert.doesNotMatch(result.reply, /售罄|标价|128元/);
   }
 });
 
-test('泛推荐排除商品零库存，未知库存不承诺有货，0元与未知价格保持准确', () => {
+test('泛推荐排除商品零库存，未知库存不承诺有货，无预算不主动堆价格', () => {
   const recommended = reply('推荐几款'); assert.equal(recommended?.action, 'reply'); assert.ok(!recommended.productIds?.includes('bread')); assert.ok(recommended.productIds?.includes('latte')); assert.ok(recommended.productIds?.includes('experience'));
-  assert.match(recommended.reply, /燕麦拿铁：标价0元/); assert.doesNotMatch(recommended.reply, /现货|有货|保证|热销|最适合/);
-  const listed = reply('有哪些商品'); assert.match(listed!.reply, /商品·面包：价格需确认（售罄）/);
+  assert.match(recommended.reply, /燕麦拿铁/); assert.doesNotMatch(recommended.reply, /现货|有货|保证|热销|最适合|\d+(?:\.\d+)?元|价格需确认/);
+  const listed = reply('有哪些商品'); assert.match(listed!.reply, /面包（暂时售罄）/); assert.doesNotMatch(listed!.reply, /标价|价格需确认/);
 });
 
-test('目录价格统一标明标价，不由结构数字编出单价单位或固定方案承诺', () => {
+test('无预算的定制服务先自然介绍名称，不由结构数字编出报价或方案承诺', () => {
   const result = suggestCatalogReply([product('flower', '鲜花定制', { type: 'service', price: 199, description: '基础方案199元起，花材另行确认。' })], messages('有什么服务'), [], 300);
-  assert.equal(result?.action, 'reply'); assert.match(result.reply, /服务·鲜花定制：标价199元/); assert.match(result.reply, /具体方案请店员确认/); assert.doesNotMatch(result.reply, /\/份|\/束|\/杯|只需|总价|包全部/);
+  assert.equal(result?.action, 'reply'); assert.match(result.reply, /^我们提供鲜花定制。/); assert.match(result.reply, /您想了解哪一项/); assert.doesNotMatch(result.reply, /商品·|服务·|标价|199元|具体方案请店员确认|\/份|\/束|\/杯|只需|总价|包全部/);
 });
 
 test('明确其他商品排除最近客户和商家已经提及的名称', () => {
@@ -125,8 +126,8 @@ test('无可列项、推荐全部零库存或长名超预算均安全clarify，�
 });
 
 test('小数目录价格不四舍五入伪造，商品描述中的价格与单位不被采用', () => {
-  const result = suggestCatalogReply([product('fraction', '样品', { price: 1.005, description: '此描述没有可用单价单位。示例999元不能成为标价。' })], messages('有哪些商品'), [], 300);
-  assert.match(result!.reply, /标价1\.005元/); assert.doesNotMatch(result!.reply, /999元|标价1\.01元/);
+  const result = suggestCatalogReply([product('fraction', '样品', { price: 1.005, description: '此描述没有可用单价单位。示例999元不能成为标价。' })], messages('2元推荐几款产品'), [], 300);
+  assert.match(result!.reply, /样品（1\.005元）/); assert.doesNotMatch(result!.reply, /999元|1\.01元/);
 });
 
 test('空消息和无效字数配置回交原流程，不能输出超限或空回复', () => {
@@ -134,10 +135,10 @@ test('空消息和无效字数配置回交原流程，不能输出超限或空�
   for (const limit of [NaN, Infinity, 0, -1, 39]) assert.equal(suggestCatalogReply(catalog(), messages('有哪些商品'), [], limit), null);
 });
 
-test('目录使用真实换行，不输出字面反斜杠n或NUL，带NUL的名称不进入发送', () => {
+test('自然目录不输出字面反斜杠n或NUL，带NUL的名称不进入发送', () => {
   const nul = String.fromCharCode(0), slash = String.fromCharCode(92);
   const result = suggestCatalogReply([product('coffee', '咖啡'), product('invalid', `茶${nul}包`)], messages('有哪些商品'), [], 300);
-  assert.equal(result?.action, 'reply'); assert.equal(result.reply.split('\n').length, 3); assert.ok(!result.reply.includes(slash + 'n')); assert.ok(!result.reply.includes(nul)); assert.deepEqual(result.productIds, ['coffee']);
+  assert.equal(result?.action, 'reply'); assert.match(result.reply, /^我们有咖啡。/); assert.ok(!result.reply.includes(slash + 'n')); assert.ok(!result.reply.includes(nul)); assert.deepEqual(result.productIds, ['coffee']);
   assert.equal(suggestCatalogReply(catalog(), messages(`有哪些商品${nul}`), [], 300), null);
 });
 
@@ -145,15 +146,15 @@ test('目录使用真实换行，不输出字面反斜杠n或NUL，带NUL的名�
 test('简单数字预算推荐直接核对结构价格，不混列服务并支持真实语气词', () => {
   for (const text of ['20元推荐什么产品呢', '20元推荐什么产品？', '20元推荐什么产品呀？', '20元能买什么', '20块推荐几款', '推荐20元以内的产品', '预算20元推荐几款']) {
     const result = reply(text); assert.equal(result?.action, 'reply', text); assert.deepEqual(result.productIds, ['coffee', 'latte'], text);
-    assert.match(result.reply, /美式咖啡：标价18元/); assert.match(result.reply, /燕麦拿铁：标价0元/); assert.doesNotMatch(result.reply, /服务·|巴斯克蛋糕|面包|保证|热销|优惠/);
+    assert.match(result.reply, /^20元以内，可以看看/); assert.match(result.reply, /美式咖啡（18元）/); assert.match(result.reply, /燕麦拿铁（0元）/); assert.doesNotMatch(result.reply, /商品·|服务·|标价|巴斯克蛋糕|面包|保证|热销|优惠/);
   }
   const service = suggestCatalogReply([product('cheap-service', '体验咨询', { type: 'service', price: 10 }), ...catalog()], messages('20元推荐几款服务'), [], 300);
-  assert.equal(service?.action, 'reply'); assert.deepEqual(service.productIds, ['cheap-service']); assert.doesNotMatch(service.reply, /商品·/);
+  assert.equal(service?.action, 'reply'); assert.deepEqual(service.productIds, ['cheap-service']); assert.match(service.reply, /体验咨询（10元）/); assert.match(service.reply, /您想了解哪一项/); assert.doesNotMatch(service.reply, /商品·|服务·|标价/);
 });
 
 test('预算推荐排除未知价、非法价、超预算与零库存商品，保留0元与小数', () => {
   const products = [product('zero', '免费样品', { price: 0 }), product('edge', '边界样品', { price: 20.5, stock: null }), product('over', '超额样品', { price: 20.51 }), product('unknown', '待询价样品', { price: null }), product('empty', '售罄样品', { price: 10, stock: 0 }), product('nan', '无效价格', { price: NaN }), product('negative', '负价', { price: -1 }), product('infinite', '无穷价格', { price: Infinity })];
-  const result = suggestCatalogReply(products, messages('20.5元能买什么产品'), [], 300); assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['zero', 'edge']); assert.match(result.reply, /标价20\.5元/);
+  const result = suggestCatalogReply(products, messages('20.5元能买什么产品'), [], 300); assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['zero', 'edge']); assert.match(result.reply, /边界样品（20\.5元）/);
   assert.deepEqual(suggestCatalogReply(products, messages('0元推荐几款产品'), [], 300)?.productIds, ['zero']);
   const noMatch = suggestCatalogReply([product('high', '高价样品', { price: 30 }), product('unknown', '待询价样品', { price: null })], messages('20元能买什么'), [], 300);
   assert.equal(noMatch?.action, 'clarify'); assert.deepEqual(noMatch.productIds, []); assert.doesNotMatch(noMatch.reply, /标价|30元|待询价样品/);
@@ -242,7 +243,7 @@ test('合成14轮普通口味和目录问答可继续泛推荐，商家单字不
   ];
   assert.equal(history.length, 14);
   const result = suggestCatalogReply(products, messages('您好，有什么推荐'), history, 300);
-  assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['plain', 'tea', 'service']); assert.match(result.reply, /^可参考：/);
+  assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['plain', 'tea', 'service']); assert.match(result.reply, /^我们有合成酥饼和合成花茶，也提供合成体验服务。/); assert.doesNotMatch(result.reply, /商品·|服务·|标价|可参考|\d+元/);
   for (const question of ['推荐一下', '你们有啥推荐', '推荐几款吧', '20元推荐几款产品']) assert.equal(suggestCatalogReply(products, messages(question), history, 300)?.action, 'reply', question);
 });
 
@@ -312,5 +313,42 @@ test('续推荐不吞新旧限制、类别排行数量或混合批次', () => {
   for (const batch of [['还有什么推荐的', '不要咖啡'], ['还有什么推荐的', '20元推荐几款'], ['还有什么推荐的', '有什么推荐'], ['还有什么推荐的', '推荐一款']]) {
     assert.equal(isGenericRecommendationRequest(messages(...batch)), false, batch.join('|'));
     assert.equal(suggestCatalogReply(catalog(), messages(...batch), [], 300), null, batch.join('|'));
+  }
+});
+
+test('自然接待按商品服务组织完整名称，混合非食品目录不编口味或美食类别', () => {
+  const products = [product('bag', '帆布手提袋', { price: 49 }), product('candle', '手作香氛蜡烛', { price: 79 }), product('care', '皮具护理', { type: 'service', price: 128 })];
+  const goods = suggestCatalogReply(products, messages('有哪些商品'), [], 300)!;
+  assert.equal(goods.action, 'reply');assert.deepEqual(goods.productIds, ['bag', 'candle']);
+  assert.equal(goods.reply, '我们有帆布手提袋和手作香氛蜡烛。您想了解哪一款？我可以为您详细介绍。');
+  const services = suggestCatalogReply(products, messages('有什么服务'), [], 300)!;
+  assert.equal(services.reply, '我们提供皮具护理。您想了解哪一项？我可以为您详细介绍。');
+  const mixed = suggestCatalogReply(products, messages('有什么推荐的'), [], 300)!;
+  assert.deepEqual(mixed.productIds, ['bag', 'candle', 'care']);
+  assert.equal(mixed.reply, '我们有帆布手提袋和手作香氛蜡烛，也提供皮具护理。您想了解哪一项？我可以为您详细介绍。');
+  for (const result of [goods, services, mixed]) assert.doesNotMatch(result.reply, /商品·|服务·|标价|可参考|具体方案请店员确认|\d+元|美食|好吃|好喝|甜口|奶香|新鲜/);
+});
+
+test('明确及继承预算自然列价格，准确保留0元小数与预算边界', () => {
+  const products = [product('zero', '试用样品', { price: 0 }), product('decimal', '精确小数样品', { price: 1.005 }), product('edge', '预算边界样品', { price: 20 }), product('over', '超预算样品', { price: 20.01 }), product('unknown', '未定价样品', { price: null })];
+  const explicit = suggestCatalogReply(products, messages('20元推荐几款产品'), [], 300)!;
+  const inherited = suggestCatalogReply(products, messages('有什么推荐的'), [turn('customer', '预算20元。'), turn('merchant', '收到。')], 300)!;
+  for (const result of [explicit, inherited]) {
+    assert.equal(result.action, 'reply');assert.deepEqual(result.productIds, ['zero', 'decimal', 'edge']);
+    assert.equal(result.reply, '20元以内，可以看看试用样品（0元）、精确小数样品（1.005元）和预算边界样品（20元）。您想了解哪一款？我可以为您详细介绍。');
+    assert.doesNotMatch(result.reply, /标价|商品·|超预算样品|未定价样品|1\.01元|20\.01元|免费赠送|已预留/);
+  }
+});
+
+test('自然语气在紧字数上限下仍跳过过长项，不截商品全名或预算价格', () => {
+  const longName = '不可截断的完整商品名称'.repeat(10);
+  const products = [product('long', longName, { price: 18 }), product('ribbon', '丝带', { price: 2 }), product('card', '贺卡', { price: 5 })];
+  for (const [question, limit] of [['有哪些商品', 40], ['20元推荐几款产品', 45]] as const) {
+    const result = suggestCatalogReply(products, messages(question), [], limit)!;
+    assert.equal(result.action, 'reply');assert.ok(result.reply.length <= limit);
+    assert.ok(result.productIds!.includes('ribbon'));assert.ok(!result.productIds!.includes('long'));
+    assert.ok(result.reply.includes('丝带'));assert.doesNotMatch(result.reply, /不可截断|完整商品|\.\.\.|…/);
+    if (question.startsWith('20')) assert.match(result.reply, /丝带（2元）/);
+    else assert.doesNotMatch(result.reply, /\d+元/);
   }
 });

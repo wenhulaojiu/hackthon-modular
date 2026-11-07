@@ -51,7 +51,7 @@ function replySettingsData(settings: ReplySettings): ReplySettings {
     enabled: settings.enabled, mode: settings.mode, selectedCustomerIds: [...settings.selectedCustomerIds],
     autoEnrollNewContacts: settings.autoEnrollNewContacts ?? true,
     welcomeEnabled: settings.welcomeEnabled ?? true,
-    welcomeMessage: settings.welcomeMessage ?? '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。',
+    welcomeMessage: settings.welcomeMessage ?? '您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。',
     ...(settings.storeInfo ? { storeInfo: { ...(settings.storeInfo.contactName === undefined ? {} : { contactName: settings.storeInfo.contactName }), phone: settings.storeInfo.phone, address: settings.storeInfo.address, serviceContent: settings.storeInfo.serviceContent } } : {}),
     businessHours: { enabled: settings.businessHours.enabled, start: settings.businessHours.start, end: settings.businessHours.end, days: [...settings.businessHours.days] },
     faq: faqData(settings.faq), handoffKeywords: [...settings.handoffKeywords], maxReplyChars: settings.maxReplyChars,

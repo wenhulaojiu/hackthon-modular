@@ -15,7 +15,7 @@ export function assertAdditiveEnrollment(previous, next) {
   const beforeIds = previous.settings.selectedCustomerIds;
   const afterIds = next.settings.selectedCustomerIds;
   if (!Array.isArray(beforeIds) || !Array.isArray(afterIds) || afterIds.length > 500 || new Set(afterIds).size !== afterIds.length || afterIds.some(id => !identifier(id)) || beforeIds.some(id => !afterIds.includes(id))) fail();
-  const unchangedSettings = settings => ({ ...settings, autoEnrollNewContacts: settings.autoEnrollNewContacts ?? true, welcomeEnabled: settings.welcomeEnabled === undefined ? true : settings.welcomeEnabled, welcomeMessage: settings.welcomeMessage === undefined ? '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。' : settings.welcomeMessage, selectedCustomerIds: [] });
+  const unchangedSettings = settings => ({ ...settings, autoEnrollNewContacts: settings.autoEnrollNewContacts ?? true, welcomeEnabled: settings.welcomeEnabled === undefined ? true : settings.welcomeEnabled, welcomeMessage: settings.welcomeMessage === undefined ? '您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。' : settings.welcomeMessage, selectedCustomerIds: [] });
   if (!isDeepStrictEqual(unchangedSettings(next.settings), unchangedSettings(previous.settings)) || !isDeepStrictEqual({ ...next, settings: previous.settings, customers: previous.customers }, previous)) fail();
   const old = new Map(previous.customers.map(customer => [customer.id, customer]));
   const nextIds = new Set();
