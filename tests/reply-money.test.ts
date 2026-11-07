@@ -73,3 +73,18 @@ test('金额后紧邻数量仍核验完整金额，不把数量接入金额', ()
   const bad = unverifiedReplyAmounts('商品￥1.2.3元2个。', ['商品3元。'], []);
   assert.equal(bad.length, 1); assert.equal(Number.isNaN(bad[0]), true);
 });
+
+
+test('客户口语金额推荐与购买询问可提供预算，回复报价仍逐处核验', () => {
+  for (const customer of ['20元推荐什么产品', '20元推荐什么产品呢', '20元推荐什么产品？', '20元推荐什么产品呀？', '20块推荐几款', '20元能买什么', '推荐20元以内的产品', '请问20元可以推荐哪些饮品？']) {
+    assert.deepEqual(unverifiedReplyAmounts('您的预算20元，可以看看面包10元和美式咖啡18元。', sources, [customer]), [], customer);
+    assert.deepEqual(unverifiedReplyAmounts('预算20元，面包20元。', sources, [customer]), [20], customer);
+    assert.deepEqual(unverifiedReplyAmounts('面包20元。', sources, [customer]), [20], customer);
+  }
+});
+
+test('商品报价与不完整推荐句式不能误作客户预算', () => {
+  for (const customer of ['面包20元', '报价20元', '退款20元', '面包20元推荐什么产品', '20元推荐面包', '20元推荐什么产品，面包要30元', '报价20元推荐什么产品', '退款20元能买什么']) {
+    assert.deepEqual(unverifiedReplyAmounts('预算20元。', sources, [customer]), [20], customer);
+  }
+});

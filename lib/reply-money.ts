@@ -25,13 +25,23 @@ function budgetOccurrence(text: string, amount: Amount): boolean {
   return /^(?:|按|按照|以|根据|在|您|你|我|您的|你的|我的|客户的|按您|按您的|按照您|按照您的|根据您|根据您的|在您|在您的|您提到的|按您提到的|只看|只要|想要|想找|推荐|推荐一些|推荐几款|可选)$/u.test(prefix);
 }
 
+function customerBudgetOccurrence(text: string, amount: Amount): boolean {
+  if (budgetOccurrence(text, amount)) return true;
+  if (!Number.isFinite(amount.value) || amount.value < 0) return false;
+  // 客户以金额开头询问可推荐或可购买的产品，视为预算；商品报价不能套用此句式。
+  const prefix = text.slice(0, amount.start).replace(/\s+/gu, '');
+  const suffix = text.slice(amount.end).replace(/\s+/gu, '');
+  if (!/^(?:请问|请|麻烦|想问(?:一下|下)?|我想问(?:一下|下)?)?$/u.test(prefix)) return false;
+  return /^(?:钱)?(?:(?:以内|以下|之内)的?)?(?:(?:可以|能)?推荐(?:什么|哪些|几款|几种)(?:商品|产品|饮品|服务)?|(?:可以|能)(?:买|选)(?:什么|哪些)(?:商品|产品|饮品|服务)?)(?:呢|吗|呀|啊)?[。！？?!]*$/u.test(suffix);
+}
+
 export function unverifiedReplyAmounts(reply: string, sourceTexts: string[], customerTexts: string[]): number[] {
   const allowed = new Set(sourceTexts.flatMap(text => amounts(text).map(item => item.value)).filter(Number.isFinite));
   const budgets = new Set<number>();
   for (const text of customerTexts) {
     // 报价、退款、已发生付款等金额不能变成给新报价放行的预算依据。
     if (/报价|标价|售价|单价|退款|退货|退钱|赔偿|转账|收款|已付|付款|支付|改价/u.test(text)) continue;
-    for (const amount of amounts(text, true)) if (budgetOccurrence(text, amount)) budgets.add(amount.value);
+    for (const amount of amounts(text, true)) if (customerBudgetOccurrence(text, amount)) budgets.add(amount.value);
   }
   // 多个不同预算的适用关系不明确时，不自行选择其中一个。
   const budget = budgets.size === 1 ? [...budgets][0] : undefined;

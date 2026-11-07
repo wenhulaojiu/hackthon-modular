@@ -3,7 +3,7 @@ import type { Product, ReplyResult } from './types';
 type Message = { text: string; date: string };
 type Turn = Message & { sender: 'customer' | 'merchant' };
 type Scope = 'product' | 'service' | 'all';
-type Request = { scope: Scope | null; mode: 'catalog' | 'recommend'; other: boolean };
+type Request = { scope: Scope | null; mode: 'catalog' | 'recommend'; other: boolean; maxPrice?: number };
 const scopeFor = (noun?: string): Scope => noun === '商品' || noun === '产品' ? 'product' : noun === '服务' || noun === '服务项目' ? 'service' : 'all';
 const normalize = (text: string) => text.normalize('NFKC').toLowerCase();
 
@@ -12,6 +12,17 @@ function parseRequest(text: string): Request | null {
   let value = normalize(text).trim().replace(/[?!。.~]+$/u, '').trim();
   // 只接受完整简单句；不删句中标点，避免把复合问题或附加指令揉成目录请求。
   value = value.replace(/^(?:你好|您好)[,，\s]*/u, '').replace(/^请问[,，\s]*/u, '').replace(/\s+/gu, '').replace(/[吗呢呀啊]$/u, '');
+  // 仅识别完整的简单金额推荐；没有类型时只列商品，类别或其他约束仍交回AI。
+  const amount = String.raw`(\d+(?:\.\d+)?)`;
+  const unit = '(?:元|块)(?:钱)?';
+  const noun = '(商品|产品|服务项目|服务)?';
+  const budgetRecommendation = value.match(new RegExp(`^(?:预算)?${amount}${unit}(?:(?:以内|以下|之内)的?)?请?(?:推荐(?:什么|哪些|几款|一些|几个|几种)|(?:可以|能)买(?:什么|哪些))${noun}$`, 'u'))
+    ?? value.match(new RegExp(`^请?(?:给我|帮我)?推荐(?:几款|一些|几个|几种)?${amount}${unit}(?:以内|以下|之内)的?${noun}$`, 'u'));
+  if (budgetRecommendation) {
+    const maxPrice = Number(budgetRecommendation[1]);
+    if (!Number.isFinite(maxPrice) || maxPrice < 0) return null;
+    return { scope: budgetRecommendation[2]?.startsWith('服务') ? 'service' : 'product', mode: 'recommend', other: false, maxPrice };
+  }
   if (/^(?:还有其他的|还有别的|还有其他|还有别的吗)$/u.test(value)) return { scope: null, mode: 'catalog', other: true };
   let match = value.match(/^(?:你们|店里|店内|这里)?(?:都)?(?:卖什么|卖哪些(?:商品|产品)?)$/u);
   if (match) return { scope: 'product', mode: 'catalog', other: false };
@@ -49,7 +60,8 @@ function mentionedProducts(products: Product[], history: Turn[]): Set<string> {
 }
 
 function simpleHistoricalQuestion(text: string, products: Product[]): boolean {
-  if (parseRequest(text)) return true;
+  const request = parseRequest(text);
+  if (request) return request.maxPrice === undefined;
   const value = normalize(text).trim().replace(/[?!。.~]+$/u, '').replace(/^(?:你好|您好)[,，\s]*/u, '').replace(/^请问[,，\s]*/u, '').replace(/\s+/gu, '');
   const acknowledgement = value.replace(/[\p{P}\p{S}]/gu, '');
   if (!acknowledgement || new Set(['你好', '您好', 'hi', 'hello', '哈喽', '嗨', '嗯', '嗯嗯', '好', '好的', '收到', '知道了', '了解了', '明白了', '谢谢', '谢谢你', '谢谢您', '谢谢啦', '好的谢谢', '好谢谢', '稍后再说']).has(acknowledgement)) return true;
@@ -88,8 +100,8 @@ export function suggestCatalogReply(products: Product[], messages: Message[], co
   });
   if (resolved.some(request => !request)) return null;
   const request = resolved[0]!;
-  if (resolved.some(item => item!.scope !== request.scope || item!.mode !== request.mode || item!.other !== request.other)) return null;
-  const candidates = valid.filter(product => product.enabled && (request.scope === 'all' || product.type === request.scope) && (!request.other || !mentioned.has(product.id)) && (request.mode !== 'recommend' || product.type !== 'product' || product.stock !== 0));
+  if (resolved.some(item => item!.scope !== request.scope || item!.mode !== request.mode || item!.other !== request.other || item!.maxPrice !== request.maxPrice)) return null;
+  const candidates = valid.filter(product => product.enabled && (request.scope === 'all' || product.type === request.scope) && (!request.other || !mentioned.has(product.id)) && (request.mode !== 'recommend' || product.type !== 'product' || product.stock !== 0) && (request.maxPrice === undefined || typeof product.price === 'number' && Number.isFinite(product.price) && product.price >= 0 && product.price <= request.maxPrice));
   const prefix = '可参考：';
   const ending = '具体方案请店员确认。';
   const rows: string[] = [], ids: string[] = [];

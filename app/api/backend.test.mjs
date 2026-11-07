@@ -1332,6 +1332,10 @@ test('客户预算可作为上限说明，但不能变成商品报价且商家�
     const question = { ...input, message: { ...input.message, text: '面包和美式咖啡有什么可以推荐？' } };
     const history = text => [{ sender: 'customer', text, date: '2026-11-07T09:00:00Z' }];
     for (const text of ['我的预算只有20元。', '只看20块以内的饮品。']) assert.equal((await f.server.runReplyAI('alice', { ...question, context: history(text) })).action, 'reply');
+    for (const text of ['20元推荐什么产品', '20元推荐什么产品呢', '20块推荐几款', '20元能买什么', '推荐20元以内的产品']) {
+      const oral = await f.server.runReplyAI('alice', { ...question, message: { ...question.message, text }, context: [] });
+      assert.equal(oral.action, 'reply', text); assert.match(oral.reply, /10元[\s\S]*18元/);
+    }
     assert.equal((await f.server.runReplyAI('alice', question)).action, 'handoff');
     assert.equal((await f.server.runReplyAI('alice', { ...question, context: [{ sender: 'merchant', text: '您的预算20元。', date: '2026-11-07T09:00:00Z' }] })).action, 'handoff');
     reply = '您的预算20元，面包标价20元。';
