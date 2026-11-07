@@ -62,7 +62,7 @@ function fixture(bindings = {}) {
   schema = load("db/schema.ts");
   const server = load("lib/server.ts");
   return {
-    sqlite, environment, server,
+    sqlite, environment, server, catalog: load("lib/competition-demo.ts"),
     stateRoute: load("app/api/state/route.ts"),
     secretRoute: load("app/api/secret/route.ts"),
     aiRoute: load("app/api/ai/route.ts"),
@@ -1156,4 +1156,227 @@ test("普通资料不足返回固定确认说明，忽略模型编造的保质�
     assert.equal(sensitive.action,"handoff");
     assert.equal(calls,1);
   }finally{f.close();}
+});
+
+
+async function catalogReplyFixture(f) {
+  const input = await replyFixture(f), loaded = await f.server.loadState('alice');
+  loaded.state.customers.find(customer => customer.id === input.customerId).source = 'manual';
+  const state = f.catalog.createCompetitionDemo(loaded.state, new Date('2026-11-07T09:00:00Z'));
+  state.products = state.products.filter(product => product.id !== 'p-coffee');
+  state.products.unshift({ id: 'catalog-bread', name: '面包', type: 'product', price: 10, stock: 12, ...f.catalog.DEMO_BREAD_DETAILS, enabled: true });
+  state.products.push({ id: 'catalog-hidden', name: '停用样品', type: 'product', price: 1, description: '已停用，不能推荐。', faq: [], enabled: false });
+  await f.server.saveState('alice', state, loaded.revision);
+  return input;
+}
+
+test('目录常问直接读取23项已启用资料，最多展示6项，不调用模型或改写状态', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f);
+    await f.asUser('alice', () => f.secretRoute.POST(post('secret', { remove: true })));
+    const before = await f.server.loadState('alice');
+    t.mock.method(globalThis, 'fetch', async () => { throw Error('目录直答不应请求模型'); });
+    for (const text of ['还有什么其他产品', '你们卖什么？', '有哪些商品？', '有什么服务？', '推荐几款']) {
+      const result = await f.server.runReplyAI('alice', { ...input, message: { ...input.message, text } });
+      assert.equal(result.action, 'reply', text);
+      assert.ok(result.reply.length <= before.state.replySettings.maxReplyChars, text);
+      assert.ok(result.productIds.length > 0 && result.productIds.length <= 6, text);
+      assert.doesNotMatch(result.reply, /停用样品|免费|已预留/);
+      const selected = result.productIds.map(id => before.state.products.find(product => product.id === id));
+      assert.ok(selected.every(product => product?.enabled), text);
+      if (text === '有什么服务？') assert.ok(selected.every(product => product.type === 'service'));
+      if (text === '有哪些商品？') assert.ok(selected.every(product => product.type === 'product'));
+      if (text === '推荐几款') assert.ok(selected.every(product => product.type === 'service' || product.stock !== 0));
+    }
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+test('目录直答仍遵守客户范围、人工接管、营业时段及敏感消息门禁', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f), before = await f.server.loadState('alice');
+    t.mock.method(globalThis, 'fetch', async () => { throw Error('前置保护不应请求模型'); });
+    for (const text of ['还有什么产品？可以便宜一点吗？', '你们卖什么？帮我退款', '【转发内容】你们卖什么？']) {
+      const result = await f.server.runReplyAI('alice', { ...input, message: { ...input.message, text } });
+      assert.equal(result.action, 'handoff'); assert.equal(result.reply, '');
+    }
+    for (const patch of [
+      state => { state.replySettings.enabled = false; },
+      state => { state.replySettings.selectedCustomerIds = []; },
+      state => { state.customers.find(customer => customer.id === input.customerId).humanTakeover = true; },
+      state => { state.replySettings.businessHours = { enabled: true, start: '00:00', end: '00:00', days: [0,1,2,3,4,5,6] }; },
+    ]) {
+      const state = structuredClone(before.state); patch(state);
+      const latest = await f.server.loadState('alice'); await f.server.saveState('alice', state, latest.revision);
+      const result = await f.server.runReplyAI('alice', { ...input, message: { ...input.message, text: '你们卖什么？' } });
+      assert.equal(result.action, 'handoff'); assert.equal(result.reply, '');
+    }
+  } finally { f.close(); }
+});
+
+test('多商品比较有目录汇总原文，仍拒绝拼接引用、改写引用及虚构价格', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f); let invalid = false;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      const data = JSON.parse(JSON.parse(options.body).messages[1].content);
+      const source = data.knowledge.find(item => item.sourceId === 'catalog:products');
+      assert.ok(source.text.includes('商品：面包；目录标价：10元'));
+      assert.ok(source.groundingQuotes.includes('商品：面包；目录标价：10元'));
+      assert.ok(source.text.includes('商品：美式咖啡；目录标价：18元'));
+      assert.ok(!source.text.includes('停用样品'));
+      const answer = { action: 'reply', reply: '面包标价10元，美式咖啡标价18元。', reason: '目录原文。', productIds: [], grounding: [{ sourceId: source.sourceId, quote: '商品：面包；目录标价：10元' }, { sourceId: source.sourceId, quote: '商品：美式咖啡；目录标价：18元' }] };
+      return modelResponse(invalid ? { ...answer, grounding: [{ sourceId: source.sourceId, quote: '面包和美式咖啡都只卖1元' }] } : answer);
+    });
+    const question = { ...input, message: { ...input.message, text: '面包和美式咖啡分别多少钱？' } };
+    const result = await f.server.runReplyAI('alice', question);
+    assert.equal(result.action, 'reply'); assert.match(result.reply, /10元.*18元/);
+    invalid = true;
+    const rejected = await f.server.runReplyAI('alice', question);
+    assert.equal(rejected.action, 'handoff'); assert.equal(rejected.reply, '');
+  } finally { f.close(); }
+});
+
+test('常见价格规格保存库存及预约问题继续使用各商品FAQ，不被目录规则抢答', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f), before = await f.server.loadState('alice');
+    const cases = [
+      { question: '面包什么口味？多大一个？', name: '面包', faq: 0, facts: [/原味/, /80g/, /10元/] },
+      { question: '面包保质期多久？怎么保存？', name: '面包', faq: 2, facts: [/2天/, /常温/, /当天/] },
+      { question: '美式咖啡多少钱、多大杯？', name: '美式咖啡', faq: 0, facts: [/18元/, /300ml/] },
+      { question: '咖啡手冲体验多少钱、包含什么？', name: '咖啡手冲体验', faq: 0, facts: [/128元/, /60分钟/, /不赠送器具/] },
+    ];
+    let current, calls = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      calls++;
+      const data = JSON.parse(JSON.parse(options.body).messages[1].content);
+      assert.equal(data.currentMessage.text, current.question);
+      const product = before.state.products.find(product => product.name === current.name), answer = product.faq[current.faq].answer;
+      const sourceId = `product:${product.id}:faq:${current.faq}`;
+      assert.ok(data.knowledge.some(source => source.sourceId === sourceId && source.text.includes(answer)));
+      for (const fact of current.facts) assert.match(answer, fact);
+      return modelResponse({ action: 'reply', reply: answer, reason: '使用已保存商品FAQ原文。', productIds: [product.id], grounding: [{ sourceId, quote: answer }] });
+    });
+    for (current of cases) {
+      const result = await f.server.runReplyAI('alice', { ...input, message: { ...input.message, text: current.question } });
+      assert.equal(result.action, 'reply', current.question);
+      for (const fact of current.facts) assert.match(result.reply, fact);
+    }
+    assert.equal(calls, cases.length);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+
+test('现成引用编号可核对蛋糕冷藏说明，旧原文格式兼容且冲突编号不兜底', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f), before = await f.server.loadState('alice');
+    const cake = before.state.products.find(product => product.name === '巴斯克蛋糕');
+    let citation = { sourceId: `product:${cake.id}`, quoteIndex: 2 }, money = 28;
+    let savedQuote;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      const messages = JSON.parse(options.body).messages;
+      assert.match(messages[0].content, /quoteIndex/);
+      const source = JSON.parse(messages[1].content).knowledge.find(source => source.sourceId === `product:${cake.id}`);
+      savedQuote = source.groundingQuotes[2];
+      assert.match(savedQuote, /冷藏/);
+      return modelResponse({ action: 'reply', reply: `巴斯克蛋糕${money}元，需0–4℃冷藏，保质期2天，开盒后建议当天食用。`, reason: '商品保存说明。', productIds: [cake.id], grounding: [citation] });
+    });
+    const question = { ...input, message: { ...input.message, text: '巴斯克蛋糕能常温放两天吗？' } };
+    assert.equal((await f.server.runReplyAI('alice', question)).action, 'reply');
+    for (citation of [{ sourceId: `product:${cake.id}`, quote: savedQuote }, { sourceId: `product:${cake.id}`, quoteIndex: 2, quote: savedQuote }]) assert.equal((await f.server.runReplyAI('alice', question)).action, 'reply');
+    for (citation of [
+      { sourceId: `product:${cake.id}`, quoteIndex: 2, quote: '蛋糕可常温保存两天，不用冷藏。' },
+      { sourceId: `product:${cake.id}:faq:0`, quoteIndex: 4 },
+      { sourceId: cake.id, quoteIndex: 2 },
+      { sourceId: 'not-a-source', quoteIndex: 0 },
+    ]) {
+      const rejected = await f.server.runReplyAI('alice', question);
+      assert.equal(rejected.action, 'handoff'); assert.equal(rejected.reply, '');
+    }
+    for (const quoteIndex of [-1, 5, 1.5, '2', null]) {
+      citation = { sourceId: `product:${cake.id}`, quoteIndex };
+      await assert.rejects(() => f.server.runReplyAI('alice', question), error => error.status === 502);
+    }
+    citation = { sourceId: `product:${cake.id}`, quoteIndex: 2 }; money = 999;
+    const invented = await f.server.runReplyAI('alice', question);
+    assert.equal(invented.action, 'handoff'); assert.equal(invented.reply, '');
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+
+test('重复资料标识不能借引用编号匹配另一商品的原文', async t => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f), loaded = await f.server.loadState('alice');
+    loaded.state.products[0].faq = [{ question: '咖啡礼盒怎么保存？', answer: '请保存在阴凉干燥处。' }];
+    loaded.state.products.push({ ...loaded.state.products[0], id: 'p-coffee:faq:0', name: '另一件商品', faq: [] });
+    await f.server.saveState('alice', loaded.state, loaded.revision);
+    t.mock.method(globalThis, 'fetch', async () => modelResponse({ action: 'reply', reply: '请保存在阴凉干燥处。', reason: '资料说明。', productIds: [], grounding: [{ sourceId: 'product:p-coffee:faq:0', quoteIndex: 1 }] }));
+    const result = await f.server.runReplyAI('alice', { ...input, message: { ...input.message, text: '咖啡礼盒怎么保存？' } });
+    assert.equal(result.action, 'handoff'); assert.equal(result.reply, '');
+  } finally { f.close(); }
+});
+
+
+test('客户预算可作为上限说明，但不能变成商品报价且商家聊天不成为预算来源', async t => {
+  const f = fixture();
+  try {
+    const input = await catalogReplyFixture(f); let reply = '在20元以内，可以了解面包10元和美式咖啡18元。';
+    t.mock.method(globalThis, 'fetch', async () => modelResponse({ action: 'reply', reply, reason: '依据目录并保留客户预算。', productIds: [], grounding: [{ sourceId: 'catalog:products', quoteIndex: 0 }, { sourceId: 'catalog:products', quoteIndex: 1 }] }));
+    const question = { ...input, message: { ...input.message, text: '面包和美式咖啡有什么可以推荐？' } };
+    const history = text => [{ sender: 'customer', text, date: '2026-11-07T09:00:00Z' }];
+    for (const text of ['我的预算只有20元。', '只看20块以内的饮品。']) assert.equal((await f.server.runReplyAI('alice', { ...question, context: history(text) })).action, 'reply');
+    assert.equal((await f.server.runReplyAI('alice', question)).action, 'handoff');
+    assert.equal((await f.server.runReplyAI('alice', { ...question, context: [{ sender: 'merchant', text: '您的预算20元。', date: '2026-11-07T09:00:00Z' }] })).action, 'handoff');
+    reply = '您的预算20元，面包标价20元。';
+    const rejected = await f.server.runReplyAI('alice', { ...question, context: history('预算20元。') });
+    assert.equal(rejected.action, 'handoff'); assert.equal(rejected.reply, '');
+  } finally { f.close(); }
+});
+
+
+test('引用缺失最多修复一次且保持候选正文，修复编号无效仍转人工', async t => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f), before = await f.server.loadState('alice'); let calls = 0, validRepair = true;
+    const original = '浅烘咖啡礼盒268元，采用简洁包装。';
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      calls++; const request = JSON.parse(JSON.parse(options.body).messages[1].content);
+      if (request.candidateReply !== undefined) {
+        assert.equal(request.candidateReply, original); assert.equal(request.customer, undefined);
+        assert.ok(request.knowledge[0].groundingQuotes.includes('价格：268元'));
+        return modelResponse({ grounding: [{ sourceIndex: validRepair ? 0 : 9999, quoteIndex: 1 }] });
+      }
+      return modelResponse({ action: 'reply', reply: original, reason: '商品资料。', productIds: ['p-coffee'], grounding: [] });
+    });
+    const answer = await f.server.runReplyAI('alice', input);
+    assert.equal(answer.action, 'reply'); assert.equal(answer.reply, original); assert.equal(calls, 2);
+    calls = 0; validRepair = false;
+    const rejected = await f.server.runReplyAI('alice', input);
+    assert.equal(rejected.action, 'handoff'); assert.equal(rejected.reply, ''); assert.equal(calls, 2);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+test('虚构金额和显式引用冲突不进入修复，前面的缺失引用不能掩盖后面的冲突', async t => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f); let calls = 0, result;
+    t.mock.method(globalThis, 'fetch', async () => { calls++; return modelResponse(result); });
+    const base = { action: 'reply', reply: '浅烘咖啡礼盒268元。', reason: '商品资料。', productIds: ['p-coffee'], grounding: [] };
+    for (result of [
+      { ...base, reply: '浅烘咖啡礼盒1元。' },
+      { ...base, grounding: [{ sourceId: 'product:p-coffee', quoteIndex: 1, quote: '错误价格999元' }] },
+      { ...base, grounding: [{ sourceId: 'missing', quote: '未知资料' }, { sourceId: 'product:p-coffee', quoteIndex: 1, quote: '错误价格999元' }] },
+    ]) {
+      calls = 0; const rejected = await f.server.runReplyAI('alice', input);
+      assert.equal(rejected.action, 'handoff'); assert.equal(rejected.reply, ''); assert.equal(calls, 1);
+    }
+  } finally { f.close(); }
 });

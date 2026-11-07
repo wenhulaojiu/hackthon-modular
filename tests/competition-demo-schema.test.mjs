@@ -15,6 +15,8 @@ const requireSchema = name => {
   if (name === '@/db/schema' || name === '@/lib/seed') return {};
   if (name === '@/lib/reply-context') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/reply-context.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(nativeRequire, module, module.exports); return module.exports; }
   if (name === '@/lib/competition-demo') { const module = { exports: {} }; new Function('require', 'module', 'exports', compile('../lib/competition-demo.ts'))(nativeRequire, module, module.exports); return module.exports; }
+  if (name === '@/lib/reply-catalog') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/reply-catalog.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(nativeRequire, module, module.exports); return module.exports; }
+  if (name === '@/lib/reply-money') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/reply-money.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(nativeRequire, module, module.exports); return module.exports; }
   if (name.startsWith('@/')) throw new Error(`未声明的测试依赖：${name}`);
   return nativeRequire(name);
 };
