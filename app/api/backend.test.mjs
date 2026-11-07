@@ -1384,3 +1384,28 @@ test('虚构金额和显式引用冲突不进入修复，前面的缺失引用�
     }
   } finally { f.close(); }
 });
+
+
+test('明确预算在多轮旧询价已确认留货及旧预算后连续直答，不调用模型', async t => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f), loaded = await f.server.loadState('alice');
+    loaded.state.products = [
+      { id: 'synthetic-roll', name: '合成软包', type: 'product', price: 10, stock: 9, enabled: true, description: '', faq: [] },
+      { id: 'synthetic-black', name: '合成黑咖', type: 'product', price: 18, stock: 9, enabled: true, description: '', faq: [] },
+      { id: 'synthetic-high', name: '合成高价品', type: 'product', price: 28, stock: 9, enabled: true, description: '', faq: [] },
+      { id: 'synthetic-service', name: '合成咨询', type: 'service', price: 15, enabled: true, description: '', faq: [] },
+    ];
+    await f.server.saveState('alice', loaded.state, loaded.revision);
+    const before = await f.server.loadState('alice');
+    const turn = (sender, text) => ({ sender, text, date: '2026-11-07T10:00:00Z' });
+    const context = [turn('customer', '想咨询合成软包'), turn('customer', '合成软包多少钱一份'), turn('merchant', '合成软包标价10元。'), turn('customer', '.'), turn('customer', '你好，合成黑咖多少钱'), turn('merchant', '合成黑咖18元。'), turn('customer', '请给我留一份'), turn('merchant', '收到'), turn('customer', '合成软包有什么口味'), turn('merchant', '口味以店员核实为准。'), turn('customer', '店里卖哪些商品'), turn('merchant', '参考已保存目录。'), turn('customer', '20元推荐几款产品'), turn('merchant', 'x')];
+    t.mock.method(globalThis, 'fetch', async () => { throw Error('明确预算目录不应请求模型'); });
+    const body = { ...input, message: { ...input.message, text: '20元推荐什么产品呢' }, context };
+    const first = await f.server.runReplyAI('alice', body);
+    assert.equal(first.action, 'reply'); assert.deepEqual(first.productIds, ['synthetic-roll', 'synthetic-black']); assert.doesNotMatch(first.reply, /高价品|合成咨询|28元/);
+    const second = await f.server.runReplyAI('alice', { ...body, message: { ...body.message, id: 'synthetic-repeat', date: '2026-11-07T10:02:00Z' }, context: [...context, turn('customer', body.message.text), turn('merchant', first.reply)] });
+    assert.equal(second.action, 'reply'); assert.deepEqual(second.productIds, first.productIds);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});

@@ -161,7 +161,8 @@ test('预算目录只识别完整简单句，类别、过敏、附加条件与�
 
 test('预算请求不能进入无条件历史白名单，普通目录不得抹去既有预算', () => {
   for (const budget of ['20元推荐什么产品呢', '20元能买什么', '20块推荐几款', '推荐20元以内的产品']) {
-    for (const question of ['有哪些商品', '推荐几款', '还有其他产品吗', '20元推荐几款']) assert.equal(reply(question, [turn('customer', budget), turn('merchant', '美式咖啡标价18元。')]), null, `${budget} → ${question}`);
+    for (const question of ['有哪些商品', '推荐几款', '还有其他产品吗']) assert.equal(reply(question, [turn('customer', budget), turn('merchant', '美式咖啡标价18元。')]), null, `${budget} → ${question}`);
+    assert.equal(reply('20元推荐几款', [turn('customer', budget), turn('merchant', '美式咖啡标价18元。')])?.action, 'reply', budget);
   }
   assert.equal(reply('20元推荐什么产品', [turn('customer', '我对花生过敏。')]), null);
 });
@@ -169,4 +170,37 @@ test('预算请求不能进入无条件历史白名单，普通目录不得抹�
 test('合并预算请求必须预算和类型都一致，无预算或不同预算不能合并直答', () => {
   assert.equal(suggestCatalogReply(catalog(), messages('20元推荐什么产品', '20块推荐几款'), [], 300)?.action, 'reply');
   for (const batch of [['20元推荐几款', '30元推荐几款'], ['20元推荐几款', '推荐几款'], ['20元推荐几款产品', '20元推荐几款服务'], ['20元能买什么', '我对牛奶过敏']]) assert.equal(suggestCatalogReply(catalog(), messages(...batch), [], 300), null, batch.join('|'));
+});
+
+
+test('合成多轮场景中的询价口味已应答留货及旧预算不永久阻断当前完整预算', () => {
+  const products = [product('bread', '合成软包', { price: 10, stock: 10 }), product('coffee', '合成黑咖', { price: 18, stock: 10 }), product('latte', '合成奶咖', { price: 28 }), product('service', '合成咨询服务', { type: 'service', price: 15 })];
+  const history = [turn('customer', '我想咨询合成软包'), turn('merchant', '合成软包标价10元。'), turn('customer', '合成软包多少钱一份'), turn('merchant', '合成软包标价10元。'), turn('customer', '.'), turn('customer', '你好，合成黑咖多少钱'), turn('merchant', '合成黑咖标价18元。'), turn('customer', '请给我留一份'), turn('merchant', '收到'), turn('customer', '合成软包有什么口味'), turn('merchant', '口味需要店员确认。'), turn('customer', '店里卖哪些商品'), turn('merchant', '也有合成黑咖和合成奶咖。'), turn('customer', '请问有哪些商品'), turn('merchant', '请参考店内登记目录。'), turn('customer', '20元推荐什么产品呢'), turn('merchant', 'x')];
+  const firstMessages = messages('20元推荐什么产品呢');
+  const first = suggestCatalogReply(products, firstMessages, history, 300); assert.equal(first?.action, 'reply'); assert.deepEqual(first.productIds, ['bread', 'coffee']); assert.doesNotMatch(first.reply, /合成奶咖|合成咨询服务|28元/);
+  const repeated = [...history, turn('customer', firstMessages[0].text, firstMessages[0].date), turn('merchant', first.reply, '2026-11-07T09:01:20Z')];
+  const second = suggestCatalogReply(products, [{ text: '20元推荐什么产品呢', date: '2026-11-07T09:02:00Z' }], repeated, 300); assert.equal(second?.action, 'reply'); assert.deepEqual(second.productIds, ['bread', 'coffee']);
+});
+
+test('当前明确预算只更新纯旧预算，普通目录仍不能丢掉旧预算', () => {
+  for (const old of ['预算20元。', '我的预算只有10元。', '30元推荐几款产品', '20元以内']) {
+    const history = [turn('customer', old), turn('merchant', '收到。')];
+    const result = reply('20元推荐几款产品', history); assert.equal(result?.action, 'reply', old); assert.deepEqual(result.productIds, ['coffee', 'latte']);
+    assert.equal(reply('有哪些商品', history), null, old);
+  }
+  assert.equal(reply('20元推荐几款产品', [turn('customer', '20元推荐几款服务')]), null);
+});
+
+test('预算直答继续保留已应答甚至更早的持续限制和未知实质条件', () => {
+  for (const condition of ['我乳糖不耐受。', '我对花生过敏。', '我吃素。', '只看饮品。', '我喜欢甜口的。', '不要含奶的。', '我不喝咖啡。', '预算20元，只看饮品。', '还有一个特殊要求稍后说明。']) {
+    const history = [turn('customer', condition), turn('merchant', '好'), turn('customer', '20元推荐几款产品'), ...Array.from({ length: 6 }, () => turn('merchant', '美式咖啡标价18元。'))];
+    assert.equal(reply('20元推荐什么产品呢', history), null, condition);
+  }
+});
+
+test('普通按份询价与独立留货需有对应应答，未知客户字符不当成商家确认', () => {
+  assert.equal(reply('20元推荐几款', [turn('customer', '面包多少钱一份')]), null);
+  assert.equal(reply('20元推荐几款', [turn('customer', '面包多少钱一份'), turn('merchant', '面包标价10元。')])?.action, 'reply');
+  for (const history of [[turn('customer', '帮我留一个')], [turn('customer', '帮我留一个'), turn('merchant', 'n')], [turn('customer', '帮我留一个'), turn('customer', '好')], [turn('customer', 'n'), turn('merchant', '好')]]) assert.equal(reply('20元推荐几款', history), null);
+  assert.equal(reply('20元推荐几款', [turn('customer', '帮我留一个'), turn('merchant', '好')])?.action, 'reply');
 });

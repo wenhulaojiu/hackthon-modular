@@ -80,6 +80,38 @@ function simpleHistoricalQuestion(text: string, products: Product[]): boolean {
   return false;
 }
 
+function budgetHistoryResolved(history: Turn[], products: Product[], scope: Scope): boolean {
+  const compact = (text: string) => normalize(text).trim().replace(/[?!。.~]+$/u, '').replace(/\s+/gu, '');
+  const money = String.raw`(?:[¥￥]?\d+(?:\.\d+)?(?:元|块)(?:钱)?)`;
+  const pureBudget = new RegExp(`^(?:(?:(?:我|本次|这次)的?)?预算(?:只有|是|为|在|不超过|最多|上限(?:是|为)?)?${money}(?:以内|以下|之内|内)?|(?:不超过|最多)${money}|${money}(?:以内|以下|之内|的预算))$`, 'u');
+  for (const [index, turn] of history.entries()) {
+    if (turn.sender !== 'customer') continue;
+    const value = compact(turn.text);
+    // 持续的饮食、类别和偏好条件不能被新预算或商家的后续应答冲掉。
+    if (/过敏|乳糖|忌口|禁忌|不耐受|素食|吃素|偏好|喜欢|不(?:能|要|想|吃|喝)|只(?:要|看|吃|喝|选)|必须|仅限/u.test(value)) return false;
+    const priorRequest = parseRequest(turn.text);
+    if (priorRequest?.maxPrice !== undefined) {
+      if (priorRequest.scope !== scope) return false;
+      continue;
+    }
+    // 当前明确预算更新的是纯预算维度，不能让附带其他要求的旧句混入。
+    if (pureBudget.test(value) || simpleHistoricalQuestion(turn.text, products)) continue;
+    const inquiry = value.replace(/^(?:你好|您好)[,，]*/u, '').replace(/^请问[,，]*/u, '');
+    const answered = history.slice(index + 1).some(next => next.sender === 'merchant' && /[\p{L}\p{N}]/u.test(next.text) && !/^[a-z]$/iu.test(next.text.trim()));
+    if (answered && products.some(product => {
+      const name = normalize(product.name.trim()).replace(/\s+/gu, '');
+      return name && inquiry.startsWith(name) && /^(?:多少钱|价格多少)(?:一|每)(?:份|个|杯|盒|件|套|束)[吗呢呀啊]?$/u.test(inquiry.slice(name.length));
+    })) continue;
+    const reservation = value.match(/^请?(?:帮我|给我)?(?:预留|留)(?:[一二三四五六七八九十两]+|\d+)(?:个|份|杯|盒|件|套|束)(.*)$/u);
+    const nextTurn = history.slice(index + 1).find(next => next.text.trim());
+    const acknowledged = nextTurn?.sender === 'merchant' && /^(?:好|好的|可以|行|收到|没问题|已为您预留|已帮您预留|已留好)[！!。.\s]*$/u.test(nextTurn.text.trim());
+    if (reservation && acknowledged && (!reservation[1] || products.some(product => normalize(product.name.trim()).replace(/\s+/gu, '') === reservation[1]))) continue;
+    // 未识别的实质内容继续交给AI，不能因为当前问题完整就丢掉历史。
+    return false;
+  }
+  return true;
+}
+
 export function suggestCatalogReply(products: Product[], messages: Message[], context: Turn[], maxReplyChars: number): ReplyResult | null {
   if (!messages.length || !Number.isFinite(maxReplyChars)) return null;
   const limit = Math.min(300, Math.floor(maxReplyChars));
@@ -90,8 +122,6 @@ export function suggestCatalogReply(products: Product[], messages: Message[], co
   const preceding = context.filter(turn => turn.sender !== 'customer' || !current.has(`${turn.date}\0${turn.text}`));
   const history = preceding.slice(-6);
   const valid = products.filter(product => typeof product.name === 'string' && product.name.trim() && product.name.isWellFormed() && !product.name.includes('\0'));
-  // 所有目录模式都检查完整的已提供客户历史，后续普通提问不能默默撤销更早的条件。
-  if (preceding.some(turn => turn.sender === 'customer' && !simpleHistoricalQuestion(turn.text, valid))) return null;
   const mentioned = mentionedProducts(valid, history);
   const mentionedTypes = new Set(valid.filter(product => mentioned.has(product.id)).map(product => product.type));
   const resolved = requests.map(request => {
@@ -101,6 +131,10 @@ export function suggestCatalogReply(products: Product[], messages: Message[], co
   if (resolved.some(request => !request)) return null;
   const request = resolved[0]!;
   if (resolved.some(item => item!.scope !== request.scope || item!.mode !== request.mode || item!.other !== request.other || item!.maxPrice !== request.maxPrice)) return null;
+  // 普通目录保留原有完整历史保护；明确预算只更新已识别的预算维度。
+  if (request.maxPrice !== undefined) {
+    if (!budgetHistoryResolved(preceding, valid, request.scope!)) return null;
+  } else if (preceding.some(turn => turn.sender === 'customer' && !simpleHistoricalQuestion(turn.text, valid))) return null;
   const candidates = valid.filter(product => product.enabled && (request.scope === 'all' || product.type === request.scope) && (!request.other || !mentioned.has(product.id)) && (request.mode !== 'recommend' || product.type !== 'product' || product.stock !== 0) && (request.maxPrice === undefined || typeof product.price === 'number' && Number.isFinite(product.price) && product.price >= 0 && product.price <= request.maxPrice));
   const prefix = '可参考：';
   const ending = '具体方案请店员确认。';
