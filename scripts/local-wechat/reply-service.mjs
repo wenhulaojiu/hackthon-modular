@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createReplyEngine } from './reply-engine.mjs';
 import { createReplyAdapter } from './reply-adapter.mjs';
 import { LocalError, guardLocalRequest, readLocalBody, sendLocalJson } from './service.mjs';
@@ -20,11 +21,17 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
     if (workspace && incoming.headers['x-kexu-workspace'] !== workspace.workspaceToken) throw new LocalError(409, '微信工作区已切换，请刷新页面后重试。', 'WORKSPACE_CHANGED');
   }
   const generateReply = suppliedGenerate || (async (work, { signal } = {}) => {
+    let scopedTest = false;
+    try {
+      const policy = JSON.parse(await readFile(path.join(root, '.local-wechat', 'reply-adapter.json'), 'utf8'));
+      scopedTest = policy.type === 'scoped-test-http' && policy.workspaceToken === workspace?.workspaceToken;
+    } catch { /* 没有临时测试配置时沿用正常接待上下文。 */ }
     // 本地身份cookie仅在回环开发服务有效，云端不接受此身份。
     const response = await request(`${address.origin}/api/reply`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(75_000)]),
       headers: { Origin: address.origin, 'Content-Type': 'application/json', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) },
-      body: JSON.stringify({ customerId: work.customerId, message: work.message, context: work.context }),
+      // 临时验收只提交本批新问题，不把历史导入资料作为模型上下文。
+      body: JSON.stringify({ customerId: work.customerId, message: work.message, ...(work.messages ? { messages: work.messages } : {}), context: scopedTest ? [] : work.context || [] }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '接待回复生成失败，请检查AI配置。');

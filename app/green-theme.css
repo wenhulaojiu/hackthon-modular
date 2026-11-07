@@ -1,0 +1,199 @@
+:root {
+  --kexu-accent: #0f172a;
+  --kexu-accent-hover: #1e293b;
+  --kexu-accent-soft: #f1f5ed;
+  --kexu-ink: #0f172a;
+  --kexu-muted: #64748b;
+  --kexu-line: #e1e7e3;
+  --kexu-panel: #f7f9f5;
+  --kexu-focus: #7b9e29;
+  --kexu-lime: #b3f637;
+  --kexu-shadow: 0 3px 16px #0f172a04;
+  --background: #fafbf8;
+  --foreground: #0f172a;
+  --primary: #b3f637;
+  --primary-foreground: #0f172a;
+}
+body { background: var(--background); color: var(--kexu-ink); font-size: 14px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--kexu-focus); outline-offset: 3px; }
+.sidebar {
+  width: 246px;
+  overflow-y: auto;
+  padding: 27px 17px 18px;
+  background: #fff;
+  color: var(--kexu-ink);
+  border-color: var(--kexu-line);
+}
+.workspace { margin-left: 246px; }
+.brand { margin-bottom: 28px; color: var(--kexu-ink); font-size: 24px; letter-spacing: .5px; }
+.brand-mark { background: var(--kexu-lime); color: var(--kexu-ink); border-radius: 13px; box-shadow: none; }
+.brand-mark::after { display: none; }
+.brand-en { color: var(--kexu-muted); }
+.store-switch { color: var(--kexu-ink); background: #fff; border-color: var(--kexu-line); border-radius: 13px; }
+.store-switch strong { font-size: 13px; }
+.store-switch small { color: var(--kexu-muted); font-size: 11px; }
+.store-initial { color: var(--kexu-ink); background: var(--kexu-accent-soft); }
+.nav-label { color: var(--kexu-muted); font-size: 11px; padding-top: 25px; }
+.nav-item { color: #334155; padding: 12px 14px; font-size: 14px; border-radius: 12px; }
+.nav-item:hover { color: var(--kexu-ink); background: #f8faf7; }
+.nav-item.active { color: var(--kexu-ink); background: #f2f4f6; font-weight: 650; box-shadow: none; }
+.nav-item.active::before { display: none; }
+.nav-count, .nav-item.active .nav-count { color: var(--kexu-ink); background: #e8f4d5; }
+.sidebar-bottom { padding-top: 24px; }
+.help-link, .sidebar-footer { color: var(--kexu-muted); }
+.help-link { font-size: 12px; }
+.sidebar-footer { border-color: var(--kexu-line); font-size: 10px; }
+.live-dot, .bell-button i { background: var(--kexu-lime); }
+.topbar { height: 76px; padding: 0 32px; border-color: var(--kexu-line); background: #fafbf8ed; }
+.breadcrumb { color: var(--kexu-muted); font-size: 13px; }
+.breadcrumb strong { color: var(--kexu-ink); font-weight: 550; }
+.global-search { background: #fff; border-color: var(--kexu-line); border-radius: 999px; }
+.global-search input { color: var(--kexu-ink); font-size: 13px; }
+.global-search kbd { color: #94a3b8; background: #f4f6f7; border-color: #e8ecea; }
+.account-avatar { background: #edf2e9; color: var(--kexu-ink); }
+.main-content { padding: 27px 32px 20px; }
+.page-heading { margin-bottom: 22px; align-items: center; }
+.page-heading h1 { color: var(--kexu-ink); font-size: clamp(25px, 2.2vw, 30px); line-height: 1.35; letter-spacing: -.035em; font-weight: 700; }
+.page-heading p { color: var(--kexu-muted); font-size: 13px; }
+.save-label { color: var(--kexu-muted); font-size: 12px; }
+.save-label.error { color: #a3463d; }
+.btn, .btn.sm { min-height: 39px; font-size: 13px; border-radius: 11px; }
+.btn.primary { background: var(--kexu-lime); border-color: var(--kexu-lime); color: var(--kexu-ink); box-shadow: none; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: #a2e92a; border-color: #a2e92a; }
+.btn.secondary { color: var(--kexu-ink); background: #fff; border-color: var(--kexu-line); }
+.btn.secondary:hover:not(:disabled) { background: var(--kexu-panel); border-color: #cbd5c9; }
+.card, .stat-card { background: #fff; border: 1px solid var(--kexu-line); border-radius: 22px; box-shadow: var(--kexu-shadow); }
+.card-heading { padding: 21px 23px 16px; background: none; border-bottom: 0; }
+.card-heading h2 { color: var(--kexu-ink); font-size: 17px; font-weight: 650; }
+.card-heading p { margin-top: 5px; color: var(--kexu-muted); font-size: 13px; }
+.count-label { background: #f1f5ef; color: #475569; font-size: 12px; }
+.muted, .table-secondary, .customer-source, .customer-tag { color: var(--kexu-muted); }
+.tab, .customer-filters .tab, .detail-tabs .tab, .prompt-tabs .tab { font-size: 13px; }
+.tab.active { color: var(--kexu-ink); border-color: var(--kexu-ink); font-weight: 600; }
+.input, .input.compact, .settings-page .field .input, .mono-input, .prompt-editor { font-size: 14px; }
+.input, .input.compact { min-height: 40px; color: var(--kexu-ink); border-color: var(--kexu-line); border-radius: 10px; }
+.input:focus, .input.compact:focus { border-color: var(--kexu-focus); box-shadow: 0 0 0 3px #b3f6371c; }
+.mono-input, .prompt-editor { font-size: 14px !important; }
+.field { color: #334155; font-size: 13px; }
+.data-table th, .customers-card .data-table th { color: #475569; background: #f7f9f6; border-color: var(--kexu-line); font-size: 12px; font-weight: 600; }
+.data-table td, .customers-card .data-table td { color: var(--kexu-ink); border-color: #edf0ed; font-size: 14px; }
+.data-table tbody tr:nth-child(even) { background: #fff; }
+.data-table tbody tr:hover, .data-table .customer-row:focus-visible { background: #f8faf5; }
+.customer-cell strong { color: var(--kexu-ink); font-size: 14px; }
+.list-toolbar, .customers-toolbar, .reply-product-toolbar, .reply-center-toolbar, .customers-card .customer-filters { background: #fff; }
+.list-toolbar, .reply-center-toolbar { border-bottom-color: var(--kexu-line); }
+
+/* 指标只展示真实经营数据，卡片底部承担口径说明。 */
+.stats-grid { gap: 16px; margin-bottom: 20px; }
+.stat-card, .stat-card.featured-stat { display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 190px; text-align: left; background: #fff; color: var(--kexu-ink); border-color: var(--kexu-line); }
+.stat-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 19px 21px 0; color: var(--kexu-muted); font-size: 14px; font-weight: 400; }
+.stat-top .stat-icon { width: 29px; height: 25px; flex: 0 0 29px; border: 1px solid #e3e9e4; border-radius: 8px; background: #fff; color: var(--kexu-ink); }
+.stat-top .stat-icon svg { width: 15px; height: 15px; }
+.stat-value { display: block; padding: 7px 21px 19px; margin: 0; color: var(--kexu-ink); font-size: clamp(27px, 2.4vw, 37px); font-weight: 650; letter-spacing: -.035em; line-height: 1.3; }
+.stat-value small { margin-left: 5px; color: var(--kexu-ink); font-size: 19px; font-weight: 550; letter-spacing: 0; }
+.stat-footer { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 76px; margin-top: auto; padding: 14px 21px; border-top: 1px solid #e9eeea; background: #f5f8f4; }
+.stat-footer strong { color: var(--kexu-ink); font-size: 13px; font-weight: 550; line-height: 1.5; }
+.stat-footer .stat-note { display: block; padding: 0; border: 0; margin: 0; color: var(--kexu-muted); font-size: 12px; line-height: 1.6; }
+.stat-footer > svg { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: #475569; }
+.stat-card.clickable .stat-footer { padding-right: 39px; }
+.stat-card.clickable:hover { border-color: #c7d3bd; background: #fff; }
+.stat-card.clickable:hover .stat-footer { background: #eff5e7; }
+
+.overview-middle { grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 20px; margin-bottom: 20px; }
+.chart-summary { padding: 0 23px 12px; }
+.chart-summary strong { color: var(--kexu-ink); font-size: 26px; }
+.chart-summary small { color: var(--kexu-muted); font-size: 12px; font-weight: 400; }
+.range-toggle button, .chart-legend button { color: var(--kexu-muted); font-size: 12px; }
+.range-toggle button.active { color: var(--kexu-ink); background: #f0f3ed; }
+.chart-legend button.active { color: var(--kexu-ink); }
+.chart-legend i, .chart-legend .active i { background: var(--kexu-lime); }
+.chart-area { padding: 0 18px 19px; }
+.chart-area svg { width: 100%; height: auto; max-height: 310px; overflow: visible; color: var(--kexu-lime); }
+.chart-axis { fill: var(--kexu-muted); font-size: 12px; }
+.chart-gridline { stroke: #e7ece8; stroke-dasharray: 3 5; }
+.chart-zero { stroke: #c5cec7; stroke-width: 1; }
+.chart-line { stroke: #a2df32; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.chart-area-fill { opacity: .8; }
+.chart-dot { fill: #fff; stroke: #a2df32; stroke-width: 1.4; }
+.chart-empty-bar { stroke: #a2df32; stroke-width: 2; }
+
+/* 最近记录仅展示已确认的消费与退款，不填充示例人物。 */
+.recent-card { min-width: 0; }
+.recent-list { padding: 0 23px 15px; }
+.recent-row { display: grid; grid-template-columns: 39px minmax(0, 1fr) auto; align-items: center; gap: 11px; width: 100%; padding: 14px 0; border-bottom: 1px solid #f0f3ef; text-align: left; }
+.recent-row:last-child { border-bottom: 0; }
+.recent-avatar { display: inline-flex; align-items: center; justify-content: center; width: 39px; height: 39px; flex: 0 0 39px; border-radius: 50%; color: #475569; background: #f0f4ec; }
+.recent-person { min-width: 0; }
+.recent-person strong { display: block; color: var(--kexu-ink); font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
+.recent-person small { display: block; margin-top: 3px; color: var(--kexu-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.recent-amount { color: var(--kexu-ink); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.recent-amount.refund { color: #985448; }
+.recent-card .empty-state { min-height: 230px; padding: 25px; }
+.recent-card .empty-state h3 { font-size: 15px; }
+.recent-card .empty-state p { font-size: 13px; }
+
+.avatar.wechat-avatar { width: 39px; height: 39px; border-radius: 50%; background: #f0f4ec; color: #475569; }
+.avatar.small.wechat-avatar { width: 32px; height: 32px; }
+
+.task-card { background: #fff; border-color: var(--kexu-line); border-radius: 18px; box-shadow: var(--kexu-shadow); }
+.task-card h3 { min-height: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.task-card .task-customer { color: #475569; font-size: 14px; }
+.task-card .task-date { color: var(--kexu-muted); font-size: 12px; }
+.task-card .task-date.overdue { color: #9a5d30; }
+.task-card-actions { padding-top: 12px; border-top: 1px solid #edf1eb; }
+.marketing-overview .stat-icon { background: #f0f4ec; color: var(--kexu-ink); }
+.task-card .script-preview { display: block; min-height: 100px; padding: 13px 15px; border: 1px solid #e3e9de; border-radius: 12px; background: #f8faf5; box-shadow: none; color: var(--kexu-ink); font-size: 14px; line-height: 1.65; }
+.script-preview-label { display: block; margin-bottom: 5px; color: #475569; font-size: 12px; font-weight: 600; }
+.script-preview p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.script-preview-empty p { color: var(--kexu-muted); }
+.task-script-button { min-height: 38px; font-size: 13px; }
+.modal .task-script-editor { background: #fbfcf9; border-color: #d7e1cb; box-shadow: none; color: var(--kexu-ink); font-size: 15px; line-height: 1.65; }
+.settings-section-heading h2, .local-wechat-title-row h2, .reply-knowledge-intro h2, .reply-control-copy h2 { color: var(--kexu-ink); font-size: 17px; font-weight: 600; }
+.reply-product-card, .reply-job, .local-wechat-setup-aside, .settings-tips { background: #fff; border-color: var(--kexu-line); border-radius: 16px; }
+.reply-job-draft, .local-wechat-read-prompt, .profile-facts > div, .customer-detail-stats { border-color: var(--kexu-line); background: var(--kexu-panel); }
+.reply-product-card h3, .reply-job-heading strong, .local-wechat-step h3, .detail-section-heading h3 { color: var(--kexu-ink); font-size: 15px; font-weight: 600; }
+.reply-product-description, .reply-job-message > p, .reply-job-draft p, .local-wechat-heading p { color: var(--kexu-muted); font-size: 14px; }
+.local-wechat-account { border-color: var(--kexu-line); background: var(--kexu-panel); }
+.local-wechat-account h3 { color: var(--kexu-ink); font-size: 15px; }
+.local-wechat-account p { color: var(--kexu-muted); font-size: 13px; }
+.local-wechat-account-controls .input { color: var(--kexu-ink); font-size: 14px; }
+.local-wechat-account-current small { color: var(--kexu-muted); font-size: 12px; }
+.local-wechat-account p.local-wechat-account-error { color: #995447; }
+/* 警示状态保留琥珀色含义，避免与普通lime操作混淆。 */
+.workspace-changed-banner strong { font-size: 16px; }
+.workspace-changed-banner p { font-size: 13px; }
+.content-footer { color: var(--kexu-muted); font-size: 11px; }
+.sample-links { flex-wrap: wrap; gap: 10px 15px; }
+
+@media (max-width: 1100px) {
+  .overview-middle { grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr); }
+  .stat-top, .stat-footer { padding-right: 17px; padding-left: 17px; }
+  .stat-value { padding-right: 17px; padding-left: 17px; }
+}
+@media (max-width: 960px) {
+  .overview-middle { grid-template-columns: minmax(0, 1fr); }
+  .recent-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
+}
+@media (max-width: 720px) {
+  .sidebar { width: 246px; }
+  .workspace { margin-left: 0; }
+  .topbar { height: 64px; padding: 0 18px; }
+  .main-content { padding: 22px 17px 16px; }
+  .page-heading { align-items: flex-start; gap: 14px; }
+  .page-heading h1 { font-size: 25px; }
+  .stats-grid { gap: 12px; }
+  .stat-card, .stat-card.featured-stat { min-height: 184px; }
+  .stat-top { gap: 6px; padding: 15px 15px 0; font-size: 12px; }
+  .stat-value { padding: 7px 15px 15px; font-size: 30px; }
+  .stat-value small { font-size: 16px; }
+  .stat-footer { padding: 12px 15px; }
+  .stat-footer strong { font-size: 12px; }
+  .stat-footer .stat-note { font-size: 11px; }
+  .card-heading { padding-right: 18px; padding-left: 18px; }
+  .card-heading h2 { font-size: 16px; }
+  .chart-summary { padding-right: 18px; padding-left: 18px; gap: 10px; flex-wrap: wrap; }
+  .chart-axis { font-size: 15px; }
+  .chart-axis-mobile-hide { display: none; }
+  .recent-list { grid-template-columns: minmax(0, 1fr); padding-right: 18px; padding-left: 18px; }
+  .workspace-changed-banner { align-items: stretch; flex-direction: column; }
+}

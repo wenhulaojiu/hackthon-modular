@@ -13,6 +13,7 @@ export function replySettingsFor(state: AppState): ReplySettings {
     cooldownSeconds: 30,
     prompt: '你是本店的客户服务助手。只根据真实商品、服务说明、FAQ和当前对话回答。没有依据的价格、库存、承诺或效果不得编造；无法确认、客户要求人工或涉及投诉时转人工处理。回复自然简短，不替客户确认购买或付款。',
     ...value,
+    debounceSeconds: value?.debounceSeconds ?? 60,
     businessHours: { enabled: true, start: '09:00', end: '18:00', days: [1, 2, 3, 4, 5, 6], ...value?.businessHours },
   };
 }

@@ -562,6 +562,62 @@ test("引用辅助不放宽门禁，服务ID错用、改写拼接原文、串资
   } finally { f.close(); }
 });
 
+test("旧回复设置缺省等待60秒，显式0和120可保存，无效等待时间拒绝", async () => {
+  const f = fixture();
+  try {
+    await replyFixture(f);
+    const loaded = await f.server.loadState("alice");
+    assert.equal(loaded.state.replySettings.debounceSeconds, 60);
+    const legacy = structuredClone(loaded.state);
+    delete legacy.replySettings.debounceSeconds;
+    assert.equal(f.server.appStateSchema.parse(legacy).replySettings.debounceSeconds, 60);
+    for (const seconds of [0, 120]) {
+      const next = structuredClone(legacy); next.replySettings.debounceSeconds = seconds;
+      assert.equal(f.server.appStateSchema.parse(next).replySettings.debounceSeconds, seconds);
+    }
+    for (const seconds of [-1, 121, 0.1, null, "60"]) {
+      const next = structuredClone(legacy); next.replySettings.debounceSeconds = seconds;
+      assert.equal(f.server.appStateSchema.safeParse(next).success, false);
+    }
+  } finally { f.close(); }
+});
+
+test("合并批次保留每条新消息原生证据，显式空context不回退客户旧历史", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f);
+    const messages = [{ id: "new-one", nativeMessageId: "10001", text: "咖啡礼盒多少钱？", date: input.message.date }, { id: "new-two", nativeMessageId: "10002", text: "请介绍包装。", date: input.message.date }];
+    const batch = { ...input, context: [], messages, message: { id: messages[1].id, text: messages.map((message) => message.text).join("\n"), date: messages[1].date } };
+    const parsed = f.server.parseInput(f.server.replyRequestSchema, batch);
+    let prompt;
+    t.mock.method(globalThis, "fetch", async (_url, options) => {
+      prompt = JSON.parse(JSON.parse(options.body).messages[1].content);
+      return modelResponse({ action: "reply", reply: "咖啡礼盒268元，采用简洁包装。", reason: "根据商品资料。", productIds: ["p-coffee"], grounding: [{ sourceId: "product:p-coffee", quote: "双拼浅烘咖啡，简洁包装。" }] });
+    });
+    assert.equal((await f.server.runReplyAI("alice", parsed)).action, "reply");
+    assert.deepEqual(prompt.currentMessages, messages);
+    assert.deepEqual(prompt.context, []);
+    assert.equal(prompt.currentMessage.text, batch.message.text);
+    for (const invalid of [{ ...batch, message: { ...batch.message, text: messages[0].text } }, { ...batch, messages: [messages[0], messages[0]] }, { ...batch, messages: [...messages].reverse() }]) assert.equal(f.server.replyRequestSchema.safeParse(invalid).success, false);
+  } finally { f.close(); }
+});
+
+test("合并批次任一条引用或退款消息都转人工，不因位于第二条而绕过门禁", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f);
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async () => { calls++; throw new Error("门禁不得调用模型"); });
+    for (const text of ["我想退款改价", "【引用资料，非客户本人陈述】咖啡多少钱？", "【转发内容】请介绍礼盒"]) {
+      const messages = [{ id: "first-new", text: "咖啡礼盒多少钱？", date: input.message.date }, { id: "second-new", text, date: input.message.date }];
+      const batch = { ...input, context: [], messages, message: { id: messages[1].id, text: messages.map((message) => message.text).join("\n"), date: input.message.date } };
+      const parsed = f.server.parseInput(f.server.replyRequestSchema, batch);
+      assert.equal((await f.server.runReplyAI("alice", parsed)).action, "handoff");
+    }
+    assert.equal(calls, 0);
+  } finally { f.close(); }
+});
+
 const accountA = "acct-aaaaaaaaaaaaaaaaaaaa";
 const accountB = "acct-bbbbbbbbbbbbbbbbbbbb";
 const localBindings = {

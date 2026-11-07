@@ -51,7 +51,7 @@ function replySettingsData(settings: ReplySettings): ReplySettings {
     enabled: settings.enabled, mode: settings.mode, selectedCustomerIds: [...settings.selectedCustomerIds],
     businessHours: { enabled: settings.businessHours.enabled, start: settings.businessHours.start, end: settings.businessHours.end, days: [...settings.businessHours.days] },
     faq: faqData(settings.faq), handoffKeywords: [...settings.handoffKeywords], maxReplyChars: settings.maxReplyChars,
-    cooldownSeconds: settings.cooldownSeconds, prompt: settings.prompt,
+    cooldownSeconds: settings.cooldownSeconds, debounceSeconds: settings.debounceSeconds ?? 60, prompt: settings.prompt,
   };
 }
 

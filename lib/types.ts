@@ -26,14 +26,14 @@ export type Product = { id: string; name: string; type: 'product' | 'service'; p
 export type ReplySettings = {
   enabled: boolean; mode: 'review' | 'auto'; selectedCustomerIds: string[];
   businessHours: { enabled: boolean; start: string; end: string; days: number[] };
-  faq: FAQ[]; handoffKeywords: string[]; maxReplyChars: number; cooldownSeconds: number; prompt: string;
+  faq: FAQ[]; handoffKeywords: string[]; maxReplyChars: number; cooldownSeconds: number; debounceSeconds?: number; prompt: string;
 };
 export type ReplyResult = { action: 'reply' | 'handoff'; reply: string; reason: string; productIds?: string[] };
-export type ReplyMessage = { id: string; text: string; date: string };
+export type ReplyMessage = { id: string; text: string; date: string; nativeMessageId?: string };
 export type ReplyContextMessage = { sender: 'customer' | 'merchant'; text: string; date: string };
 export type ReplyJobStatus = 'queued' | 'generating' | 'draft' | 'ready' | 'sending' | 'sent' | 'handoff' | 'failed' | 'unknown' | 'ignored' | 'cancelled';
-export type ReplyJobView = { id: string; customerId: string; chatId: string; message: ReplyMessage; status: ReplyJobStatus; reply?: string; reason?: string; createdAt: string; updatedAt: string; sendMessageId?: string };
-export type ReplyWork = { id: string; leaseId: string; customerId: string; message: ReplyMessage; context: ReplyContextMessage[] };
+export type ReplyJobView = { id: string; customerId: string; chatId: string; message: ReplyMessage; messages?: ReplyMessage[]; quietUntil?: string; status: ReplyJobStatus; reply?: string; reason?: string; createdAt: string; updatedAt: string; sendMessageId?: string };
+export type ReplyWork = { id: string; leaseId: string; customerId: string; message: ReplyMessage; messages?: ReplyMessage[]; context: ReplyContextMessage[] };
 export type AppState = { schemaVersion: 1; customers: Customer[]; orders: Order[]; tasks: Task[]; settings: Settings; imports: ImportRecord[]; demo: boolean; products?: Product[]; replySettings?: ReplySettings };
 export type PageId = 'overview' | 'customers' | 'marketing' | 'inbox' | 'settings' | 'auto-reply' | 'products';
 export type AIResult = { summary?: string; tags?: string[]; preferences?: string; budget?: string; script?: string; nextFollowUpAt?: string; orders?: Array<{description:string;amount:number;date:string;type:'sale'|'refund';evidence:string}> };

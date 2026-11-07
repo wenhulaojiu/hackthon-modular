@@ -1,19 +1,57 @@
 'use client';
-import {useState} from 'react';
-import {ArrowRight,ArrowUpRight,CalendarDays,CheckCircle2,MessageCircle,Sparkles,TrendingUp,Users,Wallet,Zap} from 'lucide-react';
-import {currency,overviewStats,shiftDate,today} from '../lib/domain';
+import {useId,useState} from 'react';
+import {ArrowRight,ArrowUpRight,CalendarDays,TrendingUp,UserRound,Users,Wallet} from 'lucide-react';
+import {currency,overviewStats,shiftDate} from '../lib/domain';
 import type {PageId,SharedProps} from '../lib/types';
 import {day,humanDate} from './ui';
 export default function Overview({state,go}:SharedProps&{go:(id:PageId,customer?:string)=>void}){
- const [range,setRange]=useState(7),[metric,setMetric]=useState<'revenue'|'customers'>('revenue');const stats=overviewStats(state,range),current=today();
- const tasks=state.tasks.filter(t=>t.status==='todo').sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4);
+ const [range,setRange]=useState(7),[metric,setMetric]=useState<'revenue'|'customers'>('revenue');const stats=overviewStats(state,range);
  const values=metric==='revenue'?stats.series.map(s=>s.netRevenue):stats.series.map(s=>state.customers.filter(c=>day(c.createdAt)===s.date).length);
- const high=Math.max(...values,1),low=Math.min(...values,0),span=high-low||1,x=(i:number)=>40+i*640/Math.max(1,values.length-1),y=(n:number)=>175-(n-low)/span*140;const path=values.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join(' ');
- const stages=['新客户','潜在客户','活跃客户','重点维护','待唤醒'],colors=['#b4a6f4','#7661de','#65b7ad','#f0b879','#d5d8e0'];let running=0;const gradient=stages.map((s,i)=>{const start=running;running+=state.customers.filter(c=>c.stage===s).length/Math.max(1,state.customers.length)*100;return `${colors[i]} ${start}% ${running}%`}).join(',');
- return <><div className="stats-grid"><Stat label="客户总数" value={state.customers.length.toString()} unit="位" icon={Users} color="purple" note="每一位客户，都值得被记住"/><Stat label={`近 ${range} 天新增客户`} value={stats.newCustomers.toString()} unit="位" icon={TrendingUp} color="green" note={`${humanDate(shiftDate(1-range))} — 今天`}/><Stat label="今日净营业额" value={currency(stats.todayRevenue).replace(/[¥￥]/g,'')} unit="元" icon={Wallet} color="amber" note="仅统计已确认的消费与退款"/><Stat label="今日待跟进" value={stats.dueTasks.toString().padStart(2,'0')} unit="项" icon={CalendarDays} color="blue" note={`${stats.pendingCount} 笔消费待确认`} action={()=>go('marketing')}/></div>
- <div className="overview-middle"><section className="card trend-card"><div className="card-heading"><div><h2>经营趋势<span className="mini-label">持续积累，稳步生长</span></h2><p>{metric==='revenue'?'已确认消费减去退款后的净收入':'按首次建档日期统计的新增客户'}</p></div><div className="range-toggle"><button className={range===7?'active':''} onClick={()=>setRange(7)}>近7天</button><button className={range===30?'active':''} onClick={()=>setRange(30)}>近30天</button></div></div><div className="chart-summary"><strong>{metric==='revenue'?currency(stats.netRevenue):stats.newCustomers}<small>{metric==='revenue'?'区间净营业额':'区间新增客户'}</small></strong><div className="chart-legend"><button className={metric==='revenue'?'active':''} onClick={()=>setMetric('revenue')}><i/>营业额</button><button className={metric==='customers'?'active':''} onClick={()=>setMetric('customers')}><i/>新增客户</button></div></div><div className="chart-area"><svg viewBox="0 0 710 225" role="img" aria-label="经营趋势图"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#8b75ed" stopOpacity=".22"/><stop offset="100%" stopColor="#8b75ed" stopOpacity=".01"/></linearGradient></defs>{[0,.5,1].map(f=><g key={f}><line x1="40" x2="680" y1={y(low+span*f)} y2={y(low+span*f)} stroke="#edf0f3" strokeDasharray="4 5"/><text x="0" y={y(low+span*f)+4} fill="#a0a5b3" fontSize="10">{Math.round(low+span*f)}</text></g>)}<path d={`${path} L${x(values.length-1)},185 L40,185 Z`} fill="url(#chartFill)"/><path d={path} stroke="#8972e5" strokeWidth="2.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>{values.map((v,i)=><g key={i}><circle cx={x(i)} cy={y(v)} r={range===7?4:2.5} fill="white" stroke="#8972e5" strokeWidth="2"><title>{stats.series[i]?.date}：{v.toFixed(2)}</title></circle>{(range===7||i%5===0||i===values.length-1)&&<text x={x(i)} y="218" textAnchor="middle" fill="#989daa" fontSize="10">{stats.series[i]?.date.slice(5).replace('-','/')}</text>}</g>)}</svg></div></section>
- <section className="card customer-mix"><div className="card-heading"><h2>客户分布</h2><button className="icon-button" onClick={()=>go('customers')} aria-label="查看客户"><ArrowUpRight size={17}/></button></div><div className="donut" style={{background:state.customers.length?`conic-gradient(${gradient})`:'#edf0f3'}}><div><strong>{state.customers.length}</strong><span>全部客户</span></div></div><div className="stage-legend">{stages.map((s,i)=><div key={s}><span><i style={{background:colors[i]}}/>{s}</span><strong>{state.customers.filter(c=>c.stage===s).length}<small>位</small></strong></div>)}</div></section></div>
- <div className="overview-bottom"><section className="card followup-card"><div className="card-heading"><div><h2>接下来，值得联系的人<span className="count-label">{state.tasks.filter(t=>t.status==='todo').length}</span></h2><p>一句及时的关心，就是下一次生意的开始</p></div><button className="text-button" onClick={()=>go('marketing')}>全部跟进<ArrowRight size={14}/></button></div>{tasks.length?<div className="followup-list">{tasks.map(t=>{const c=state.customers.find(c=>c.id===t.customerId);return <div className="followup-row" key={t.id}><button className="avatar" onClick={()=>go('customers',c?.id)} style={{background:(c?.color||'#6758e8')+'18',color:c?.color}}>{c?.name.slice(-2)||'客'}</button><div className="followup-person"><strong>{c?.name||'客户'}<span className={'badge '+(t.priority==='high'?'amber':'slate')}>{t.kind==='marketing'?'营销机会':t.kind==='reminder'?'服务提醒':'客户跟进'}</span></strong><p>{t.title}</p></div><span className={'task-date '+(day(t.date)<current?'overdue':'')}>{day(t.date)<current?'已逾期':day(t.date)===current?'今天':humanDate(t.date)}</span><button className="btn secondary sm" onClick={()=>go('customers',c?.id)}>查看客户<ArrowRight size={13}/></button></div>})}</div>:<div className="empty-state"><CheckCircle2/><h3>今天的节奏，刚刚好</h3><p>暂无待跟进任务，可以在营销页添加提醒。</p></div>}</section>
- <section className="daily-card"><div className="daily-top"><span><Sparkles size={17}/>今日经营小结</span><span>{current.slice(5).replace('-',' / ')}</span></div><h3>让客户关系，<br/>多一点温度。</h3><p>今天已有 <strong>{state.orders.filter(o=>o.status==='confirmed'&&day(o.date)===current&&o.type==='sale').length}</strong> 笔消费确认，<strong>{stats.dueTasks}</strong> 项跟进等待处理。</p><div className="daily-insight"><Zap size={18}/><span>{stats.pendingCount?`还有 ${stats.pendingCount} 笔聊天中的消费线索，确认后将更新营业额。`:'从微信聊天里，发现客户下一次需要你的时刻。'}</span></div><button onClick={()=>go('inbox')}>查看消费线索<ArrowUpRight size={16}/></button></section></div></>;
+ const areaPattern=useId();
+ const high=Math.max(...values,1), low=Math.min(...values,0);
+ const y=(value:number)=>24+(high-value)/(high-low)*156;
+ const zero=y(0), step=600/Math.max(values.length-1,1), x=(index:number)=>values.length===1?367:67+index*step;
+ const line=values.map((value,index)=>`${index?'L':'M'}${x(index)},${y(value)}`).join(' ');
+ const area=values.length?`${line} L${x(values.length-1)},${zero} L${x(0)},${zero} Z`:'';
+ const axisFormatter=new Intl.NumberFormat('zh-CN',{notation:'compact',maximumFractionDigits:1});
+ const ticks=[low,(high+low)/2,high];
+ if(low<0&&!ticks.includes(0))ticks.push(0);
+ const recentOrders=state.orders.filter(order=>order.status==='confirmed').sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,5);
+ return <><div className="stats-grid"><Stat label="客户总数" value={state.customers.length.toString()} unit="位" icon={Users} color="green" note="当前工作空间已记录的客户档案"/><Stat label={`近 ${range} 天新增客户`} value={stats.newCustomers.toString()} unit="位" icon={TrendingUp} color="green" note={`${humanDate(shiftDate(1-range))} — 今天`}/><Stat label="今日净营业额" value={currency(stats.todayRevenue).replace(/[¥￥]/g,'')} unit="元" icon={Wallet} color="amber" note="仅统计已确认的消费与退款"/><Stat label="今日待跟进" value={stats.dueTasks.toString()} unit="项" icon={CalendarDays} color="blue" note={`${stats.pendingCount} 笔消费待确认`} action={()=>go('marketing')}/></div>
+ <div className="overview-middle"><section className="card trend-card"><div className="card-heading"><div><h2>经营趋势</h2><p>{metric==='revenue'?'已确认消费减去退款后的净收入':'按首次建档日期统计的新增客户'}</p></div><div className="range-toggle"><button className={range===7?'active':''} onClick={()=>setRange(7)}>近7天</button><button className={range===30?'active':''} onClick={()=>setRange(30)}>近30天</button></div></div><div className="chart-summary"><strong>{metric==='revenue'?currency(stats.netRevenue):stats.newCustomers}<small>{metric==='revenue'?'区间净营业额':'区间新增客户'}</small></strong><div className="chart-legend"><button className={metric==='revenue'?'active':''} onClick={()=>setMetric('revenue')}><i/>营业额</button><button className={metric==='customers'?'active':''} onClick={()=>setMetric('customers')}><i/>新增客户</button></div></div><div className="chart-area">
+  <svg viewBox="0 0 680 225" role="img" aria-label={metric==='revenue'?'每日净营业额折线图':'每日新增客户折线图'}>
+   <defs>
+    <pattern id={areaPattern} width="6" height="6" patternUnits="userSpaceOnUse"><circle className="chart-pattern-dot" cx="2" cy="2" r="1" fill="currentColor" opacity=".25"/></pattern>
+   </defs>
+   {ticks.map(value=><g key={value}>
+    <line className={value===0?'chart-zero':'chart-gridline'} x1="67" x2="667" y1={y(value)} y2={y(value)}/>
+    <text className="chart-axis" x="57" y={y(value)+4} textAnchor="end">{axisFormatter.format(value)}</text>
+   </g>)}
+   {area&&<path className="chart-area-fill" d={area} fill={'url(#'+areaPattern+')'}/>}
+   {line&&<path className="chart-line" d={line} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>}
+   {values.map((value,index)=>{
+    const center=x(index);
+    const last=index===values.length-1, showLabel=range===7||index%5===0||last;
+    const mobileLabel=range===7?index%2===0:index===0||index===15||last;
+    return <g key={stats.series[index].date}>
+     <circle className="chart-dot" cx={center} cy={y(value)} r={range===7?3:2} fill="#fff" stroke="currentColor" strokeWidth="1.5"><title>{stats.series[index].date} · {metric==='revenue'?currency(value):value+' 位'}</title></circle>
+     {showLabel&&<text className={'chart-axis'+(mobileLabel?'':' chart-axis-mobile-hide')} x={center} y="210" textAnchor="middle">{stats.series[index].date.slice(5).replace('-','/')}</text>}
+    </g>;
+   })}
+  </svg>
+ </div></section>
+ <section className="card recent-card"><div className="card-heading"><div><h2>最近经营记录</h2><p>最近已确认的销售与退款</p></div><button className="icon-button" onClick={()=>go('inbox')} aria-label="核对消费与退款"><ArrowUpRight size={17}/></button></div>{recentOrders.length?<div className="recent-list">{recentOrders.map(order=>{
+  const customer=state.customers.find(item=>item.id===order.customerId);
+  const refund=order.type==='refund';
+  return <button type="button" className="recent-row" key={order.id} onClick={()=>go('customers',order.customerId)} aria-label={`${customer?.name||'客户'}，${refund?'退款':'销售'}，${humanDate(order.date)}，${currency(order.amount)}`}>
+   <span className="recent-avatar" aria-hidden="true"><UserRound size={18}/></span>
+   <span className="recent-person"><strong>{customer?.name||'客户'}</strong><small>{refund?'退款':'销售'} · {humanDate(order.date)}</small></span>
+   <span className={'recent-amount '+(refund?'refund':'sale')}>{refund?'−':'+'}{currency(order.amount)}</span>
+  </button>;
+ })}</div>:<div className="empty-state recent-empty"><Wallet size={27}/><h3>暂无已确认的经营记录</h3><p>确认消费或退款后，将在这里显示。</p></div>}</section></div>
+ </>;
 }
-function Stat({label,value,unit,icon:Icon,color,note,action}:{label:string;value:string;unit:string;icon:typeof Users;color:string;note:string;action?:()=>void}){return <section className={'stat-card '+(action?'clickable':'')} onClick={action}><div className="stat-top"><span>{label}</span><span className={'stat-icon '+color}><Icon size={19}/></span></div><div className="stat-value">{value}<small>{unit}</small></div><div className="stat-note">{note}{action&&<ArrowRight size={13}/>}</div></section>}
+function Stat({label,value,unit,icon:Icon,color,note,action}:{label:string;value:string;unit:string;icon:typeof Users;color:string;note:string;action?:()=>void}){
+ const content=<><span className="stat-top"><span>{label}</span><span className={'stat-icon '+color}><Icon size={19} strokeWidth={1.7}/></span></span><span className="stat-value">{value}<small>{unit}</small></span><span className="stat-footer"><span className="stat-note">{note}</span>{action&&<ArrowRight size={14}/>}</span></>;
+ return action ? <button type="button" className="stat-card clickable" onClick={action}>{content}</button> : <section className="stat-card">{content}</section>;
+}

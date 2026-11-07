@@ -59,7 +59,7 @@ export const replySettingsSchema = z.object({
   enabled: z.boolean(), mode: z.enum(["review", "auto"]), selectedCustomerIds: z.array(id).max(500),
   businessHours: z.object({ enabled: z.boolean(), start: clockSchema, end: clockSchema, days: z.array(z.number().int().min(0).max(6)).max(7) }).strict(),
   faq: z.array(faqSchema).max(100), handoffKeywords: z.array(z.string().min(1).max(80)).max(100),
-  maxReplyChars: z.number().int().min(40).max(1000), cooldownSeconds: z.number().int().min(0).max(3600), prompt: z.string().max(8000),
+  maxReplyChars: z.number().int().min(40).max(1000), cooldownSeconds: z.number().int().min(0).max(3600), debounceSeconds: z.number().int().min(0).max(120).default(60), prompt: z.string().max(8000),
 }).strict();
 
 const customerSchema = z.object({
@@ -436,8 +436,11 @@ export async function runAI(userId: string, request: z.infer<typeof aiRequestSch
 export const replyRequestSchema = z.object({
   customerId: id,
   message: z.object({ id, text: z.string().min(1).max(8000), date }).strict(),
+  messages: z.array(z.object({ id, text: z.string().min(1).max(8000), date, nativeMessageId: id.optional() }).strict()).min(1).max(50).optional(),
   context: z.array(z.object({ sender: z.enum(["customer", "merchant"]), text: z.string().min(1).max(4000), date: optionalDate }).strict()).max(30).optional(),
-}).strict();
+}).strict().superRefine((input, ctx) => {
+  if (input.messages && (new Set(input.messages.map((message) => message.id)).size !== input.messages.length || input.messages.map((message) => message.text).join("\n") !== input.message.text || input.messages.at(-1)?.id !== input.message.id || input.messages.at(-1)?.date !== input.message.date)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "合并消息与原始记录不一致" });
+});
 
 const SENSITIVE_REPLY = /退款|退货|退钱|改价|修改价格|调整价格|降价|砍价|还价|便宜一点|优惠一点|打折|折扣|赔偿|投诉|转人工|人工客服|真人/;
 const handoffReply = (reason: string): ReplyResult => ({ action: "handoff", reply: "", reason });
@@ -462,8 +465,9 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   if (!settings?.enabled || !settings.selectedCustomerIds.includes(customer.id) || customer.autoReplyEnabled === false) return handoffReply("当前客户未启用自动回复。");
   if (customer.humanTakeover) return handoffReply("此会话已由人工接管。");
   if (!replyHoursOpen(settings.businessHours)) return handoffReply("当前不在配置的营业时间内。");
-  if (NON_TRANSACTION_PREFIX.test(input.message.text)) return handoffReply("引用、转发或支付卡片不能作为客户本人请求自动处理。");
-  if (SENSITIVE_REPLY.test(input.message.text) || settings.handoffKeywords.some((word) => input.message.text.toLowerCase().includes(word.toLowerCase()))) return handoffReply("涉及售后、改价或需人工处理的事项。");
+  const incomingMessages = input.messages || [input.message];
+  if (incomingMessages.some((message) => NON_TRANSACTION_PREFIX.test(message.text))) return handoffReply("引用、转发或支付卡片不能作为客户本人请求自动处理。");
+  if (incomingMessages.some((message) => SENSITIVE_REPLY.test(message.text) || settings.handoffKeywords.some((word) => message.text.toLowerCase().includes(word.toLowerCase())))) return handoffReply("涉及售后、改价或需人工处理的事项。");
   const sources: Array<{ id: string; text: string; productId?: string }> = [];
   for (const [index, faq] of settings.faq.entries()) sources.push({ id: `faq:${index}`, text: `${faq.question}\n${faq.answer}` });
   const products = (state.products || []).filter((product) => product.enabled);
@@ -489,7 +493,7 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   ].join("\n");
   const content = await callModel(state.settings.ai, apiKey, [
     { role: "system", content: system },
-    { role: "user", content: JSON.stringify({ knowledge, customer: { name: customer.name, summary: customer.summary, preferences: customer.preferences, budget: customer.budget, note: customer.note }, context: input.context || customer.messages.slice(-20).map(({ sender, text, date: time }) => ({ sender, text: text.slice(0, 4000), date: time })), currentMessage: input.message }) },
+    { role: "user", content: JSON.stringify({ knowledge, customer: { name: customer.name, summary: customer.summary, preferences: customer.preferences, budget: customer.budget, note: customer.note }, context: input.context || customer.messages.slice(-20).map(({ sender, text, date: time }) => ({ sender, text: text.slice(0, 4000), date: time })), currentMessage: input.message, currentMessages: incomingMessages }) },
   ]);
   const schema = z.object({ action: z.enum(["reply", "handoff"]), reply: z.string().max(4000), reason: z.string().min(1).max(800), productIds: z.array(id).max(20).optional(), grounding: z.array(z.object({ sourceId: z.string().max(240), quote: z.string().min(4).max(2000) }).strict()).max(20).optional() }).strict();
   const parsed = schema.safeParse(jsonFromModel(content));

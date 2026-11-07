@@ -184,7 +184,7 @@ test('外部直接更改dbDir不能绕过账号隔离，明确重选可修复绑
   assert.equal(reads, 1);
 });
 
-const replyConfig = () => ({ settings: { ...structuredClone(DEFAULT_REPLY_SETTINGS), enabled: true, selectedCustomerIds: ['c1'], businessHours: { enabled: false, start: '09:00', end: '18:00', days: [1] } }, customers: [{ id: 'c1', wechatId: 'wxid_synthetic', name: '合成客户', autoReplyEnabled: true }], products: [], storeName: '合成门店', industry: '通用门店' });
+const replyConfig = () => ({ settings: { ...structuredClone(DEFAULT_REPLY_SETTINGS), enabled: true, debounceSeconds: 0, selectedCustomerIds: ['c1'], businessHours: { enabled: false, start: '09:00', end: '18:00', days: [1] } }, customers: [{ id: 'c1', wechatId: 'wxid_synthetic', name: '合成客户', autoReplyEnabled: true }], products: [], storeName: '合成门店', industry: '通用门店' });
 
 test('接待队列按账号保存，后台生成携带捕获token，换号后的批准和发送被拦截', async t => {
   const f = await fixture(t);

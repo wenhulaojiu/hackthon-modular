@@ -9,7 +9,7 @@ const goodReply = { action: "reply", reply: "您好，咖啡礼盒的价格是10
 const timestamp = Date.parse("2026-11-07T02:00:00.000Z");
 function config(mode = "auto") {
   return {
-    settings: { ...structuredClone(DEFAULT_REPLY_SETTINGS), enabled: true, mode, selectedCustomerIds: ["c1", "c2"], businessHours: { enabled: false, start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] }, cooldownSeconds: 0 },
+    settings: { ...structuredClone(DEFAULT_REPLY_SETTINGS), enabled: true, mode, selectedCustomerIds: ["c1", "c2"], businessHours: { enabled: false, start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] }, cooldownSeconds: 0, debounceSeconds: 0 },
     customers: [{ id: "c1", wechatId: "wxid_c1", name: "客户甲", autoReplyEnabled: true }, { id: "c2", wechatId: "wxid_c2", name: "客户乙", autoReplyEnabled: true }],
     products: [{ id: "coffee", name: "咖啡礼盒", type: "product", price: 100, description: "礼盒简洁包装。", faq: [], enabled: true }], storeName: "合成门店", industry: "零售",
   };
@@ -77,7 +77,7 @@ test("消息防重持久化，进程重启也不会重复回复或自动启动",
   assert.equal((await reopened.status()).jobs.length, 1);
 });
 
-test("同一会话按序生成和发送，多个会话可独立生成但发送全局串行", async (t) => {
+test("多个会话可独立生成，发送仍全局串行", async (t) => {
   const waiting = new Map();
   const started = [];
   let activeSends = 0;
@@ -88,18 +88,14 @@ test("同一会话按序生成和发送，多个会话可独立生成但发送�
     send: async () => { activeSends += 1; peak = Math.max(peak, activeSends); await new Promise((resolve) => setTimeout(resolve, 10)); activeSends -= 1; return { status: "sent", messageId: `native-${++native}` }; },
   });
   await engine.syncConfig(config()); await engine.start();
-  await engine.ingest(event("a1")); await engine.ingest(event("a2")); await engine.ingest(event("b1", "wxid_c2"));
+  await engine.ingest(event("a1")); await engine.ingest(event("b1", "wxid_c2"));
   await until(engine, () => waiting.has("a1") && waiting.has("b1"));
-  assert.equal(started.includes("a2"), false);
   waiting.get("b1")(goodReply);
   await until(engine, (state) => state.counts.sent === 1);
-  assert.equal(started.includes("a2"), false);
   waiting.get("a1")(goodReply);
-  await until(engine, () => waiting.has("a2"));
-  waiting.get("a2")(goodReply);
-  await until(engine, (state) => state.counts.sent === 3);
+  await until(engine, (state) => state.counts.sent === 2);
   assert.equal(peak, 1);
-  assert.deepEqual(started, ["a1", "b1", "a2"]);
+  assert.deepEqual(started, ["a1", "b1"]);
 });
 
 test("审核模式不会自动发送，批准后只发送一次，拒绝不能撤销已发送记录", async (t) => {
@@ -249,4 +245,192 @@ test("自动发送回声按native消息ID匹配，延迟轮询也不触发人工
   assert.equal((await engine.status()).takeovers.includes("c1"), false);
   await engine.ingest(event("actual-human", "wxid_c1", { sender: "merchant", nativeMessageId: "native-human-456", text: "我来亲自给您介绍。" }));
   assert.equal((await engine.status()).takeovers.includes("c1"), true);
+});
+
+test("旧规则缺省等待60秒，连续新消息重置时间且合并一次，重复原生消息不延后", async (t) => {
+  let clock = timestamp;
+  let sends = 0;
+  const { engine } = await fixture(t, { now: () => clock, send: async () => ({ status: "sent", messageId: `native-${++sends}` }) });
+  const legacy = config(); delete legacy.settings.debounceSeconds;
+  await engine.syncConfig(legacy);
+  assert.equal((await engine.getConfig()).settings.debounceSeconds, 60);
+  await engine.start();
+  await engine.ingest(event("part-one", "wxid_c1", { nativeMessageId: "101", text: "咖啡礼盒多少钱？" }));
+  clock += 59_999;
+  assert.equal((await engine.claimWork()).jobs.length, 0);
+  await engine.ingest(event("part-two", "wxid_c1", { nativeMessageId: "102", text: "包装简单一点。" }));
+  clock += 30_000;
+  assert.equal((await engine.ingest(event("part-two-repolled", "wxid_c1", { nativeMessageId: "102", text: "包装简单一点。" }))).duplicate, true);
+  clock += 29_999;
+  assert.equal((await engine.claimWork()).jobs.length, 0);
+  clock += 1;
+  const { jobs } = await engine.claimWork();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].message.text, "咖啡礼盒多少钱？\n包装简单一点。");
+  assert.deepEqual(jobs[0].messages.map((message) => [message.id, message.nativeMessageId]), [["part-one", "101"], ["part-two", "102"]]);
+  await engine.completeWork({ jobId: jobs[0].id, leaseId: jobs[0].leaseId, result: goodReply });
+  const state = await until(engine, (value) => value.counts.sent === 1);
+  assert.equal(state.jobs.length, 1);
+  assert.equal(state.jobs[0].messages.length, 2);
+  assert.equal(sends, 1);
+});
+
+test("生成中新消息取消旧lease并重新等待，迟到旧AI结果不能发送或覆盖新批次", async (t) => {
+  let clock = timestamp;
+  const work = [];
+  const signals = [];
+  const resolves = [];
+  let sends = 0;
+  const { engine } = await fixture(t, { now: () => clock, generate: async (item, { signal }) => { work.push(item); signals.push(signal); return new Promise(resolve => resolves.push(resolve)); }, send: async () => ({ status: "sent", messageId: `native-${++sends}` }) });
+  const settings = config(); settings.settings.debounceSeconds = 2;
+  await engine.syncConfig(settings); await engine.start();
+  await engine.ingest(event("first"));
+  clock += 2000;
+  await until(engine, () => work.length === 1);
+  clock += 500;
+  await engine.ingest(event("second", "wxid_c1", { text: "还有包装要求。" }));
+  assert.equal(signals[0].aborted, true);
+  resolves[0](goodReply);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(sends, 0);
+  assert.equal((await engine.status()).jobs[0].status, "queued");
+  clock += 1999;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(work.length, 1);
+  clock += 1;
+  await until(engine, () => work.length === 2);
+  assert.equal(work[1].messages.length, 2);
+  assert.notEqual(work[0].leaseId, work[1].leaseId);
+  resolves[1](goodReply);
+  await until(engine, (state) => state.counts.sent === 1);
+  assert.equal(sends, 1);
+});
+
+test("敏感后续消息立即阻断生成中回复，合并证据保留且旧结果不发送", async (t) => {
+  let resolveAI;
+  let signal;
+  let sends = 0;
+  const { engine } = await fixture(t, { generate: async (_work, options) => { signal = options.signal; return new Promise(resolve => { resolveAI = resolve; }); }, send: async () => { sends++; return { status: "sent", messageId: "unexpected" }; } });
+  await engine.syncConfig(config()); await engine.start();
+  await engine.ingest(event("normal-before-refund"));
+  await until(engine, () => !!resolveAI);
+  const result = await engine.ingest(event("refund-later", "wxid_c1", { text: "先别处理，我想退款改价。" }));
+  assert.equal(result.status, "handoff");
+  assert.equal(signal.aborted, true);
+  resolveAI(goodReply);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const state = await engine.status();
+  assert.equal(state.jobs.length, 1);
+  assert.equal(state.jobs[0].messages.length, 2);
+  assert.equal(state.jobs[0].status, "handoff");
+  assert.equal(sends, 0);
+});
+
+test("跨会话等待各自计算，连续输入不削弱发送冷却门禁", async (t) => {
+  let clock = timestamp;
+  let sends = 0;
+  const { engine } = await fixture(t, { now: () => clock, send: async () => ({ status: "sent", messageId: `native-${++sends}` }) });
+  const settings = config(); settings.settings.debounceSeconds = 2; settings.settings.cooldownSeconds = 10;
+  await engine.syncConfig(settings); await engine.start();
+  await engine.ingest(event("a1")); await engine.ingest(event("b1", "wxid_c2"));
+  clock += 1000;
+  await engine.ingest(event("a2"));
+  clock += 1000;
+  const first = (await engine.claimWork()).jobs;
+  assert.deepEqual(first.map((job) => job.customerId), ["c2"]);
+  await engine.completeWork({ jobId: first[0].id, leaseId: first[0].leaseId, result: goodReply });
+  await until(engine, (state) => state.counts.sent === 1);
+  await engine.ingest(event("b2", "wxid_c2"));
+  clock += 1000;
+  const second = (await engine.claimWork()).jobs;
+  assert.deepEqual(second.map((job) => job.customerId), ["c1"]);
+  await engine.completeWork({ jobId: second[0].id, leaseId: second[0].leaseId, result: goodReply });
+  await until(engine, (state) => state.counts.sent === 2);
+  clock += 8000;
+  assert.equal((await engine.claimWork()).jobs.length, 0);
+  clock += 1000;
+  const third = (await engine.claimWork()).jobs;
+  assert.equal(third.length, 1);
+  assert.equal(third[0].customerId, "c2");
+});
+
+test("已sending批次不撤回，后来消息另起批次并且不会合并已发送证据", async (t) => {
+  let finishSend;
+  let calls = 0;
+  const { engine } = await fixture(t, { generate: async () => goodReply, send: async () => { calls++; return new Promise(resolve => { finishSend = resolve; }); } });
+  await engine.syncConfig(config()); await engine.start();
+  await engine.ingest(event("in-flight"));
+  await until(engine, (state) => state.counts.sending === 1);
+  await engine.ingest(event("next-batch"));
+  let state = await engine.status();
+  assert.equal(state.jobs.length, 2);
+  assert.equal(state.counts.sending, 1);
+  assert.equal(state.counts.queued, 1);
+  assert.deepEqual(state.jobs.find((job) => job.status === "queued").messages.map((message) => message.id), ["next-batch"]);
+  finishSend({ status: "sent", messageId: "native-first" });
+  await until(engine, (value) => value.counts.sent === 1 && value.counts.sending === 1);
+  assert.equal(calls, 2);
+  finishSend({ status: "sent", messageId: "native-second" });
+  await until(engine, (value) => value.counts.sent === 2);
+});
+
+test("连续消息批次与等待截止持久化，重启不自动运行且旧原生消息仍去重", async (t) => {
+  let clock = timestamp;
+  const f = await fixture(t, { now: () => clock, send: async () => ({ status: "sent", messageId: "native" }) });
+  const settings = config("review"); settings.settings.debounceSeconds = 60;
+  await f.engine.syncConfig(settings); await f.engine.start();
+  await f.engine.ingest(event("persistent-one")); await f.engine.ingest(event("persistent-two"));
+  await f.engine.close();
+  const reopened = await f.create();
+  assert.equal((await reopened.status()).running, false);
+  await reopened.start();
+  assert.equal((await reopened.ingest(event("persistent-two"))).duplicate, true);
+  clock += 59_999;
+  assert.equal((await reopened.claimWork()).jobs.length, 0);
+  clock += 1;
+  const jobs = (await reopened.claimWork()).jobs;
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(jobs[0].messages.map((message) => message.id), ["persistent-one", "persistent-two"]);
+});
+
+test("等待时间仅允许0到120整数，明确0时无需等待", async (t) => {
+  const { engine } = await fixture(t, { send: async () => ({ status: "sent", messageId: "native" }) });
+  for (const debounceSeconds of [-1, 121, 0.5, null, "60"]) {
+    const invalid = config(); invalid.settings.debounceSeconds = debounceSeconds;
+    await assert.rejects(() => engine.syncConfig(invalid), /0–120整秒/);
+  }
+  await engine.syncConfig(config()); await engine.start(); await engine.ingest(event("immediate"));
+  assert.equal((await engine.claimWork()).jobs.length, 1);
+});
+
+test("新消息废弃旧待审核草稿并合并重算，旧批准操作不能发送过时回复", async (t) => {
+  let clock = timestamp;
+  let sends = 0;
+  const { engine } = await fixture(t, { now: () => clock, send: async () => ({ status: "sent", messageId: `native-${++sends}` }) });
+  await engine.syncConfig(config("review")); await engine.start(); await engine.ingest(event("draft-first"));
+  const old = (await engine.claimWork()).jobs[0];
+  await engine.completeWork({ jobId: old.id, leaseId: old.leaseId, result: goodReply });
+  assert.equal((await engine.status()).jobs[0].status, "draft");
+  const settings = config("review"); settings.settings.debounceSeconds = 60;
+  await engine.syncConfig(settings);
+  await engine.ingest(event("draft-extra", "wxid_c1", { text: "还想了解服务内容。" }));
+  await assert.rejects(() => engine.approve(old.id), /只有待审核/);
+  assert.equal((await engine.claimWork()).jobs.length, 0);
+  clock += 60_000;
+  const renewed = (await engine.claimWork()).jobs[0];
+  assert.equal(renewed.messages.length, 2);
+  await assert.rejects(() => engine.completeWork({ jobId: old.id, leaseId: old.leaseId, result: goodReply }), /任务已失效/);
+  assert.equal(sends, 0);
+});
+
+test("连续批次容量超限时保留全部原文证据并转人工，不截断后自动回复", async (t) => {
+  const { engine } = await fixture(t, { send: async () => ({ status: "sent", messageId: "unexpected" }) });
+  await engine.syncConfig(config()); await engine.start();
+  await engine.ingest(event("long-one", "wxid_c1", { text: "咨询".repeat(2500) }));
+  const result = await engine.ingest(event("long-two", "wxid_c1", { text: "补充".repeat(2500) }));
+  assert.equal(result.status, "handoff");
+  const job = (await engine.status()).jobs[0];
+  assert.equal(job.messages.length, 2);
+  assert.equal(job.message.text.length, 10_001);
+  assert.equal((await engine.claimWork()).jobs.length, 0);
 });

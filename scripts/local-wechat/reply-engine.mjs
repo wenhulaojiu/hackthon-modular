@@ -5,7 +5,7 @@ import path from "node:path";
 export const DEFAULT_REPLY_SETTINGS = {
   enabled: false, mode: "review", selectedCustomerIds: [],
   businessHours: { enabled: true, start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] },
-  faq: [], handoffKeywords: ["退款", "退货", "改价", "投诉"], maxReplyChars: 300, cooldownSeconds: 30, prompt: "",
+  faq: [], handoffKeywords: ["退款", "退货", "改价", "投诉"], maxReplyChars: 300, cooldownSeconds: 30, debounceSeconds: 60, prompt: "",
 };
 const STATUSES = ["queued", "generating", "draft", "ready", "sending", "sent", "handoff", "failed", "unknown", "ignored", "cancelled"];
 const PENDING = new Set(["queued", "generating", "draft", "ready", "sending"]);
@@ -32,8 +32,10 @@ function faqList(value, max = 100) {
 function configInput(value) {
   if (!value || typeof value !== "object" || Object.keys(value).some((key) => !["settings", "customers", "products", "storeName", "industry"].includes(key))) fail("自动回复配置格式不正确。");
   const s = value.settings;
+  const debounceSeconds = s?.debounceSeconds === undefined ? 60 : s.debounceSeconds;
   const h = s?.businessHours;
   if (!s || typeof s.enabled !== "boolean" || !["review", "auto"].includes(s.mode) || !Array.isArray(s.selectedCustomerIds) || s.selectedCustomerIds.length > 500 || s.selectedCustomerIds.some((id) => !safeId(id))) fail("请选择回复模式与客户白名单。");
+  if (!Number.isInteger(debounceSeconds) || debounceSeconds < 0 || debounceSeconds > 120) fail("等待客户说完的时间需要为0–120整秒。");
   if (!h || typeof h.enabled !== "boolean" || !clock(h.start) || !clock(h.end) || !Array.isArray(h.days) || h.days.length > 7 || h.days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) fail("营业时间格式不正确。");
   if (!Number.isInteger(s.maxReplyChars) || s.maxReplyChars < 40 || s.maxReplyChars > 1000 || !Number.isInteger(s.cooldownSeconds) || s.cooldownSeconds < 0 || s.cooldownSeconds > 3600 || !text(s.prompt, 8000, true) || !Array.isArray(s.handoffKeywords) || s.handoffKeywords.length > 100 || s.handoffKeywords.some((word) => !text(word, 80))) fail("回复长度、冷却时间或人工规则格式不正确。");
   if (!Array.isArray(value.customers) || value.customers.length > 500 || value.customers.some((c) => !c || !safeId(c.id) || !text(c.name, 160) || typeof c.wechatId !== "string" || c.wechatId.length > 200 || (c.autoReplyEnabled !== undefined && typeof c.autoReplyEnabled !== "boolean") || (c.humanTakeover !== undefined && typeof c.humanTakeover !== "boolean"))) fail("客户映射格式不正确。");
@@ -45,7 +47,7 @@ function configInput(value) {
   });
   if (new Set(products.map((p) => p.id)).size !== products.length) fail("商品 ID 不能重复。");
   return {
-    settings: { enabled: s.enabled, mode: s.mode, selectedCustomerIds: [...new Set(s.selectedCustomerIds)], businessHours: { enabled: h.enabled, start: h.start, end: h.end, days: [...new Set(h.days)] }, faq: faqList(s.faq), handoffKeywords: [...s.handoffKeywords], maxReplyChars: s.maxReplyChars, cooldownSeconds: s.cooldownSeconds, prompt: s.prompt },
+    settings: { enabled: s.enabled, mode: s.mode, selectedCustomerIds: [...new Set(s.selectedCustomerIds)], businessHours: { enabled: h.enabled, start: h.start, end: h.end, days: [...new Set(h.days)] }, faq: faqList(s.faq), handoffKeywords: [...s.handoffKeywords], maxReplyChars: s.maxReplyChars, cooldownSeconds: s.cooldownSeconds, debounceSeconds, prompt: s.prompt },
     customers: value.customers.map((c) => ({ id: c.id, wechatId: c.wechatId, name: c.name, ...(c.autoReplyEnabled !== undefined ? { autoReplyEnabled: c.autoReplyEnabled } : {}), ...(c.humanTakeover !== undefined ? { humanTakeover: c.humanTakeover } : {}) })),
     products, storeName: text(value.storeName, 120, true) ? value.storeName : "", industry: text(value.industry, 120, true) ? value.industry : "",
   };
@@ -81,7 +83,7 @@ export async function createReplyEngine(options = {}) {
   let ticking = false;
   let sendBusy = false;
   const inflight = new Set();
-  const generationControllers = new Set();
+  const generationControllers = new Map();
 
   await mkdir(directory, { recursive: true, mode: 0o700 });
   try {
@@ -134,6 +136,12 @@ export async function createReplyEngine(options = {}) {
       if (job.status === "sending") { job.status = "unknown"; job.reason = "服务在发送期间中断，必须人工核对微信，不能自动重发。"; if (!next.takeovers.includes(job.customerId)) next.takeovers.push(job.customerId); }
       else if (job.status === "generating") { job.status = "queued"; delete job.leaseId; }
       else if (job.status === "ready") { job.status = "draft"; job.reason = "服务已重启，请重新审核该回复。"; }
+      if (!job.messages) job.messages = [copy(job.message)];
+      if (job.status === "queued" && job.quietUntil === undefined) {
+        job.lastIncomingAt = Date.parse(job.updatedAt || job.createdAt);
+        if (!Number.isFinite(job.lastIncomingAt)) fail("旧回复任务缺少有效时间，原队列未被覆盖。", 503);
+        job.quietUntil = job.lastIncomingAt + (next.config?.settings.debounceSeconds ?? 60) * 1000;
+      }
     }
   });
 
@@ -145,20 +153,23 @@ export async function createReplyEngine(options = {}) {
     if (!customer || !privateId(job.chatId) || !config.settings.selectedCustomerIds.includes(customer.id) || customer.autoReplyEnabled === false) return { action: "ignored", reason: "该好友不在已启用的客户白名单中。" };
     if (customer.humanTakeover || next.takeovers.includes(customer.id)) return { action: "handoff", reason: "该会话已转人工接管。" };
     if (!isBusinessOpen(config.settings.businessHours, now())) return { action: "ignored", reason: "当前不在配置的营业时间内。" };
-    if (QUOTED.test(job.message.text)) return { action: "handoff", reason: "引用、转发或支付卡片需人工确认。" };
-    if (SENSITIVE.test(job.message.text) || config.settings.handoffKeywords.some((word) => job.message.text.toLowerCase().includes(word.toLowerCase()))) return { action: "handoff", reason: "售后、改价或特殊需求需要人工处理。" };
+    const messages = job.messages || [job.message];
+    if (messages.length > 50 || job.message.text.length > 8000) return { action: "handoff", reason: "连续消息超过单次处理容量，请人工处理，原始消息已保留。" };
+    if (messages.some((message) => QUOTED.test(message.text))) return { action: "handoff", reason: "引用、转发或支付卡片需人工确认。" };
+    if (messages.some((message) => SENSITIVE.test(message.text) || config.settings.handoffKeywords.some((word) => message.text.toLowerCase().includes(word.toLowerCase())))) return { action: "handoff", reason: "售后、改价或特殊需求需要人工处理。" };
     if (checkCooldown && next.lastSent[job.chatId] !== undefined && now() - next.lastSent[job.chatId] < config.settings.cooldownSeconds * 1000) return { action: "defer", reason: "等待会话冷却时间。" };
     return null;
   }
 
   function setHandoff(next, job, reason, status = "handoff") {
+    generationControllers.get(job.leaseId)?.abort();
     job.status = status; job.reason = reason; job.updatedAt = iso();
     delete job.leaseId;
     if (!next.takeovers.includes(job.customerId)) next.takeovers.push(job.customerId);
   }
 
   function publicJob(job) {
-    return { id: job.id, customerId: job.customerId, chatId: job.chatId, message: copy(job.message), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
+    return { id: job.id, customerId: job.customerId, chatId: job.chatId, message: copy(job.message), messages: copy(job.messages || [job.message]), ...(job.quietUntil !== undefined ? { quietUntil: new Date(job.quietUntil).toISOString() } : {}), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
   }
 
   async function status() {
@@ -193,7 +204,7 @@ export async function createReplyEngine(options = {}) {
       }
       let capacity = Math.max(0, limit - next.jobs.filter((job) => job.status === "generating").length);
       for (const job of next.jobs) {
-        if (!capacity || job.status !== "queued" || !head(next, job)) continue;
+        if (!capacity || job.status !== "queued" || !head(next, job) || now() < (job.quietUntil || 0)) continue;
         const blocked = gate(next, job);
         if (blocked) {
           if (blocked.action === "defer") continue;
@@ -205,7 +216,7 @@ export async function createReplyEngine(options = {}) {
         const history = next.history[job.chatId] || [];
         const end = history.findIndex((message) => message.id === job.message.id);
         const context = history.slice(0, end < 0 ? history.length : end + 1).slice(-20).map(({ sender, text, date }) => ({ sender, text: text.slice(0, 4000), date }));
-        jobs.push({ id: job.id, leaseId: job.leaseId, customerId: job.customerId, message: copy(job.message), context });
+        jobs.push({ id: job.id, leaseId: job.leaseId, customerId: job.customerId, message: copy(job.message), messages: copy(job.messages || [job.message]), context });
         capacity -= 1;
       }
       return jobs;
@@ -256,7 +267,7 @@ export async function createReplyEngine(options = {}) {
       const packet = await mutate((next) => {
         if (!armed || closed) return null;
         for (const job of next.jobs) {
-          if (job.status !== "ready" || !head(next, job)) continue;
+          if (job.status !== "ready" || !head(next, job) || now() < (job.quietUntil || 0)) continue;
           const blocked = gate(next, job);
           if (blocked) { if (blocked.action !== "defer") setHandoff(next, job, blocked.reason); continue; }
           if (job.configRevision !== next.configRevision && !job.manuallyApproved) { setHandoff(next, job, "发送前门店资料已变化，请人工审核。"); continue; }
@@ -303,11 +314,11 @@ export async function createReplyEngine(options = {}) {
       if (typeof generate === "function") {
         const work = await reserveWork();
         for (const item of work) {
-          const controller = new AbortController(); generationControllers.add(controller);
+          const controller = new AbortController(); generationControllers.set(item.leaseId, controller);
           track((async () => {
             try { const result = await generate(copy(item), { signal: controller.signal }); if (!closed) await completeWork({ jobId: item.id, leaseId: item.leaseId, result }); }
             catch { if (!closed) { try { await completeWork({ jobId: item.id, leaseId: item.leaseId, error: "AI 生成失败，已转人工，请检查模型配置。" }); } catch { /* 过期或已接管的任务不会重新发送。 */ } } }
-            finally { generationControllers.delete(controller); }
+            finally { generationControllers.delete(item.leaseId); }
           })());
         }
       }
@@ -326,6 +337,7 @@ export async function createReplyEngine(options = {}) {
     const rearm = armed && scope(state.config) !== scope(config);
     await mutate((next) => {
       if (JSON.stringify(next.config) !== JSON.stringify(config)) { next.config = config; next.configRevision += 1; }
+      for (const job of next.jobs) if (job.status === "queued" && job.lastIncomingAt !== undefined) job.quietUntil = job.lastIncomingAt + config.settings.debounceSeconds * 1000;
       for (const customer of config.customers) if (customer.humanTakeover && !next.takeovers.includes(customer.id)) next.takeovers.push(customer.id);
     });
     if (!config.settings.enabled) { armed = false; pausedReason = "全局开关已关闭。"; }
@@ -351,30 +363,50 @@ export async function createReplyEngine(options = {}) {
     if (!event || !safeId(event.id) || !privateId(event.chatId) || !["customer", "merchant", "system"].includes(event.sender) || !text(event.text, 8000) || !validDate(event.date)) fail("实时消息缺少稳定标识或有效内容。");
     const accepted = await mutate((next) => {
       const key = `${event.chatId}\u0000${event.id}`;
-      if (next.seen.includes(key)) return { accepted: false, duplicate: true };
+      const nativeKey = safeId(event.nativeMessageId) ? `${event.chatId}\u0000native:${event.nativeMessageId}` : null;
+      if (next.seen.includes(key) || nativeKey && next.seen.includes(nativeKey)) return { accepted: false, duplicate: true };
       if (next.seen.length >= 50_000 || next.jobs.length >= 5000) fail("本地队列容量已满，已停止接收新任务，请暂停并整理记录。", 503);
       next.seen.push(key);
+      if (nativeKey) next.seen.push(nativeKey);
       if ((event.source || "realtime") !== "realtime") return { accepted: false, reason: "历史导入与营销任务不进入自动回复队列。" };
       const matches = next.config?.customers.filter((customer) => customer.wechatId === event.chatId) || [];
       if (matches.length !== 1) return { accepted: false, reason: "会话无法唯一映射到已配置客户。" };
       const customer = matches[0];
       if (event.sender === "system" || (event.kind && event.kind !== "text")) return { accepted: false, reason: "系统或非文字消息需人工处理。" };
       const history = next.history[event.chatId] || [];
-      history.push({ id: event.id, sender: event.sender, text: event.text, date: event.date });
+      history.push({ id: event.id, ...(safeId(event.nativeMessageId) ? { nativeMessageId: event.nativeMessageId } : {}), sender: event.sender, text: event.text, date: event.date });
       next.history[event.chatId] = history.slice(-100);
       if (event.sender === "merchant") {
         const ownEcho = next.jobs.some((job) => job.chatId === event.chatId && ["sending", "sent"].includes(job.status) && job.reply === event.text && ((safeId(event.nativeMessageId) && event.nativeMessageId === job.sendMessageId) || now() - Date.parse(job.sendStartedAt || job.updatedAt) < 120_000));
-        if (event.automated !== true && !ownEcho && !next.takeovers.includes(customer.id)) next.takeovers.push(customer.id);
+        if (event.automated !== true && !ownEcho) {
+          if (!next.takeovers.includes(customer.id)) next.takeovers.push(customer.id);
+          for (const pending of next.jobs) if (pending.chatId === event.chatId && PENDING.has(pending.status) && pending.status !== "sending") setHandoff(next, pending, "检测到商户人工回复，已停止该会话的待发送回复。");
+        }
         return { accepted: false, reason: ownEcho || event.automated ? "已忽略自动发送回声。" : "检测到商户人工回复，已转人工接管。" };
       }
-      const job = { id: randomUUID(), customerId: customer.id, chatId: event.chatId, message: { id: event.id, text: event.text, date: event.date }, status: "queued", createdAt: iso(), updatedAt: iso() };
+      // 仅合并尚未交给发送适配器的消息；发送中的批次保留，新消息另起一批。
+      const pending = next.jobs.filter((item) => item.chatId === event.chatId && item.customerId === customer.id && ["queued", "generating", "draft", "ready"].includes(item.status));
+      const job = pending[0] || { id: randomUUID(), customerId: customer.id, chatId: event.chatId, createdAt: iso() };
+      const messages = pending.flatMap((item) => item.messages || [item.message]);
+      messages.push({ id: event.id, ...(safeId(event.nativeMessageId) ? { nativeMessageId: event.nativeMessageId } : {}), text: event.text, date: event.date });
+      const seenMessages = new Set();
+      job.messages = messages.filter((message) => !seenMessages.has(message.id) && seenMessages.add(message.id));
+      const last = job.messages.at(-1);
+      job.message = { id: last.id, text: job.messages.map((message) => message.text).join("\n"), date: last.date };
+      for (const previous of pending) {
+        generationControllers.get(previous.leaseId)?.abort();
+        delete previous.leaseId; delete previous.leaseUntil; delete previous.reply; delete previous.productIds; delete previous.manuallyApproved;
+        if (previous !== job) { previous.status = "cancelled"; previous.reason = "已合并到同一会话的连续消息批次。"; previous.mergedInto = job.id; previous.updatedAt = iso(); }
+      }
+      job.status = "queued"; job.lastIncomingAt = now(); job.quietUntil = now() + (next.config.settings.debounceSeconds ?? 60) * 1000; job.updatedAt = iso(); job.reason = "等待客户说完后合并回复。";
       const blocked = !armed ? { action: "ignored", reason: "回复服务尚未启动，消息不会补发。" } : gate(next, job);
       if (blocked && blocked.action !== "defer") {
         if (blocked.action === "handoff") setHandoff(next, job, blocked.reason);
         else { job.status = "ignored"; job.reason = blocked.reason; }
       }
-      next.jobs.push(job);
-      return { accepted: job.status === "queued", jobId: job.id, status: job.status };
+      if (!pending.length) next.jobs.push(job);
+      if (blocked?.action === "handoff") for (const previous of next.jobs) if (previous.chatId === event.chatId && previous !== job && PENDING.has(previous.status) && previous.status !== "sending") setHandoff(next, previous, blocked.reason);
+      return { accepted: job.status === "queued", jobId: job.id, status: job.status, merged: pending.length > 0 };
     });
     schedule();
     return accepted;
@@ -422,7 +454,7 @@ export async function createReplyEngine(options = {}) {
 
   async function close() {
     armed = false; closed = true; clearTimeout(pumpTimer); clearInterval(interval);
-    for (const controller of generationControllers) controller.abort();
+    for (const controller of generationControllers.values()) controller.abort();
     await mutate((next) => {
       for (const job of next.jobs) {
         if (job.status === "sending") setHandoff(next, job, "服务在发送期间关闭，结果未知，必须人工核对。", "unknown");

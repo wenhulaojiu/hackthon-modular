@@ -2,70 +2,70 @@
 .data-export-overlay { z-index: 100; }
 .data-export-modal { width: min(770px, 100%); padding: 26px; }
 .data-export-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 23px; }
-.data-export-symbol { display: grid; place-items: center; width: 45px; height: 45px; flex: 0 0 45px; border: 1px solid #e9e0f7; border-radius: 13px; color: #a18ac4; background: #f3eefb; }
+.data-export-symbol { display: grid; place-items: center; width: 45px; height: 45px; flex: 0 0 45px; border: 1px solid var(--kexu-line); border-radius: 13px; color: var(--kexu-accent); background: var(--kexu-accent-soft); }
 .data-export-heading > div { flex: 1; }
-.data-export-heading h2 { margin: 0 0 7px; color: #6f5b83; font-size: 18px; font-weight: 550; }
-.data-export-heading p { color: #98899f; font-size: 11px; line-height: 1.8; }
-.data-export-heading > .icon-button { align-self: flex-start; color: #b3a1be; }
-.data-export-complete { display: flex; align-items: center; gap: 15px; padding: 18px; border: 1px solid #e8dcf5; border-radius: 11px; background: linear-gradient(120deg, #faf5ff, #fdfbff); }
-.data-export-format { display: flex; align-items: center; flex-direction: column; gap: 6px; justify-content: center; width: 51px; height: 59px; flex: 0 0 51px; color: #b292cd; border: 1px solid #e6d5f3; border-radius: 10px; background: #f2e9fc; }
-.data-export-format > span { font-size: 8px; font-weight: 600; letter-spacing: 1px; }
+.data-export-heading h2 { margin: 0 0 7px; color: var(--kexu-ink); font-size: 18px; font-weight: 550; }
+.data-export-heading p { color: var(--kexu-muted); font-size: 14px; line-height: 1.8; }
+.data-export-heading > .icon-button { align-self: flex-start; color: var(--kexu-muted); }
+.data-export-complete { display: flex; align-items: center; gap: 15px; padding: 18px; border: 1px solid var(--kexu-line); border-radius: 11px; background: linear-gradient(120deg, var(--kexu-accent-soft), var(--kexu-panel)); }
+.data-export-format { display: flex; align-items: center; flex-direction: column; gap: 6px; justify-content: center; width: 51px; height: 59px; flex: 0 0 51px; color: var(--kexu-accent); border: 1px solid var(--kexu-line); border-radius: 10px; background: var(--kexu-accent-soft); }
+.data-export-format > span { font-size: 12px; font-weight: 600; letter-spacing: 1px; }
 .data-export-complete > div:nth-child(2) { flex: 1; min-width: 0; }
-.data-export-complete h3 { margin: 0 0 7px; font-size: 13px; font-weight: 550; color: #90729f; }
-.data-export-complete p { margin: 0; color: #a38bad; font-size: 10px; line-height: 1.9; max-width: 420px; }
-.data-export-complete > div > span { display: block; margin-top: 7px; font-size: 9px; color: #b49cc1; }
-.data-export-complete .btn { white-space: nowrap; flex: 0 0 auto; font-size: 10px; }
+.data-export-complete h3 { margin: 0 0 7px; font-size: 16px; font-weight: 550; color: var(--kexu-ink); }
+.data-export-complete p { margin: 0; color: var(--kexu-muted); font-size: 14px; line-height: 1.9; max-width: 420px; }
+.data-export-complete > div > span { display: block; margin-top: 7px; font-size: 12px; color: var(--kexu-muted); }
+.data-export-complete .btn { white-space: nowrap; flex: 0 0 auto; font-size: 14px; }
 .data-export-section-label { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin: 24px 0 13px; }
-.data-export-section-label > span { font-size: 11px; color: #a28aaf; }
-.data-export-section-label > small { font-size: 9px; color: #bea8ca; }
+.data-export-section-label > span { font-size: 14px; color: var(--kexu-ink); }
+.data-export-section-label > small { font-size: 12px; color: var(--kexu-muted); }
 .data-export-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
-.data-export-options article { display: flex; align-items: flex-start; flex-direction: column; padding: 17px; border: 1px solid #eee3f5; border-radius: 10px; background: #fff; }
-.data-export-option-icon { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; background: #f3edf9; color: #b79acc; margin-bottom: 14px; }
-.data-export-option-icon.orders { background: #f1f6ed; color: #a5b491; }
-.data-export-option-icon.tasks { background: #fcf3e8; color: #c5ab86; }
-.data-export-options h3 { font-size: 12px; font-weight: 500; color: #9675a4; margin: 0 0 8px; }
-.data-export-options p { font-size: 10px; color: #b097bd; line-height: 1.95; margin: 0; flex: 1; }
-.data-export-options article > small { font-size: 9px; color: #bba1c7; margin: 14px 0 13px; }
-.data-export-options .btn { width: 100%; justify-content: center; font-size: 10px; }
-.data-export-scope { display: flex; align-items: flex-start; gap: 8px; padding: 13px 1px; color: #b2a0bf; }
+.data-export-options article { display: flex; align-items: flex-start; flex-direction: column; padding: 17px; border: 1px solid var(--kexu-line); border-radius: 10px; background: #fff; }
+.data-export-option-icon { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; background: var(--kexu-accent-soft); color: var(--kexu-accent); margin-bottom: 14px; }
+.data-export-option-icon.orders { background: var(--kexu-accent-soft); color: var(--kexu-accent); }
+.data-export-option-icon.tasks { background: #fcf3e8; color: #8e611f; }
+.data-export-options h3 { font-size: 16px; font-weight: 500; color: var(--kexu-ink); margin: 0 0 8px; }
+.data-export-options p { font-size: 14px; color: var(--kexu-muted); line-height: 1.95; margin: 0; flex: 1; }
+.data-export-options article > small { font-size: 12px; color: var(--kexu-muted); margin: 14px 0 13px; }
+.data-export-options .btn { width: 100%; justify-content: center; font-size: 14px; }
+.data-export-scope { display: flex; align-items: flex-start; gap: 8px; padding: 13px 1px; color: var(--kexu-muted); }
 .data-export-scope > svg { margin-top: 2px; }
-.data-export-scope p { margin: 0; font-size: 9px; line-height: 1.9; color: #ab96b8; }
-.data-export-privacy { display: flex; align-items: flex-start; gap: 9px; padding: 13px 15px; color: #b19bc0; background: #fbf7fe; border: 1px solid #f2e9f9; border-radius: 9px; }
+.data-export-scope p { margin: 0; font-size: 13px; line-height: 1.9; color: var(--kexu-muted); }
+.data-export-privacy { display: flex; align-items: flex-start; gap: 9px; padding: 13px 15px; color: var(--kexu-muted); background: var(--kexu-panel); border: 1px solid var(--kexu-line); border-radius: 9px; }
 .data-export-privacy svg { margin-top: 3px; }
-.data-export-privacy p { margin: 0; font-size: 9px; color: #b49cc2; line-height: 1.95; }
+.data-export-privacy p { margin: 0; font-size: 13px; color: var(--kexu-muted); line-height: 1.95; }
 .data-export-privacy p + p { margin-top: 5px; }
-.data-export-result { display: flex; align-items: center; gap: 6px; font-size: 10px; line-height: 1.8; color: #8ca180; padding: 13px 1px 0; overflow-wrap: anywhere; }
-.data-export-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-top: 19px; margin-top: 18px; border-top: 1px solid #f0e8f6; }
-.data-export-footer > span { color: #bda4cb; font-size: 9px; }
-.settings-export-row { padding-top: 0; padding-bottom: 19px; border-top: 0; border-bottom: 1px solid #eef0f5; margin-bottom: 19px; }
+.data-export-result { display: flex; align-items: center; gap: 6px; font-size: 14px; line-height: 1.8; color: var(--kexu-accent); padding: 13px 1px 0; overflow-wrap: anywhere; }
+.data-export-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-top: 19px; margin-top: 18px; border-top: 1px solid var(--kexu-line); }
+.data-export-footer > span { color: var(--kexu-muted); font-size: 12px; }
+.settings-export-row { padding-top: 0; padding-bottom: 19px; border-top: 0; border-bottom: 1px solid var(--kexu-line); margin-bottom: 19px; }
 .settings-export-row + .data-settings-row { border-top: 0; padding-top: 0; }
 .heading-actions .global-export-button { display: inline-flex; }
 /* 主要说明保持可读，浅色仅用于装饰和次要状态。 */
-.data-export-complete p, .data-export-options p { color: #8e759f; }
-.data-export-scope p, .data-export-privacy p, .data-export-footer > span { color: #9b84aa; }
+.data-export-complete p, .data-export-options p { color: var(--kexu-muted); }
+.data-export-scope p, .data-export-privacy p, .data-export-footer > span { color: var(--kexu-muted); }
 @media (max-width: 720px) {
   .data-export-modal { padding: 21px; }
   .data-export-heading { gap: 10px; margin-bottom: 19px; }
   .data-export-heading h2 { font-size: 16px; }
-  .data-export-heading p { font-size: 10px; }
+  .data-export-heading p { font-size: 14px; }
   .data-export-symbol { width: 39px; height: 39px; flex-basis: 39px; border-radius: 11px; }
   .data-export-complete { padding: 16px; flex-wrap: wrap; gap: 12px; }
   .data-export-complete .btn { width: 100%; justify-content: center; margin-top: 2px; }
-  .data-export-complete p { font-size: 10px; }
+  .data-export-complete p { font-size: 14px; }
   .data-export-complete > div:nth-child(2) { flex-basis: calc(100% - 63px); }
   .data-export-options { grid-template-columns: 1fr; gap: 11px; }
   .data-export-options article { display: grid; align-items: center; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px 11px; padding: 15px; }
   .data-export-option-icon { grid-column: 1; grid-row: 1 / 4; margin-bottom: 0; }
-  .data-export-options h3 { grid-column: 2; margin: 0; font-size: 11px; }
-  .data-export-options p { grid-column: 2; font-size: 9px; }
-  .data-export-options article > small { grid-column: 2; margin: 3px 0 0; font-size: 8px; }
-  .data-export-options .btn { grid-column: 3; grid-row: 1 / 4; width: auto; padding: 8px; font-size: 9px; }
+  .data-export-options h3 { grid-column: 2; margin: 0; font-size: 14px; }
+  .data-export-options p { grid-column: 2; font-size: 14px; }
+  .data-export-options article > small { grid-column: 2; margin: 3px 0 0; font-size: 12px; }
+  .data-export-options .btn { grid-column: 3; grid-row: 1 / 4; width: auto; padding: 8px; font-size: 13px; }
   .data-export-options .btn > svg { display: none; }
   .data-export-section-label { margin-top: 21px; }
-  .data-export-section-label > small { font-size: 8px; }
+  .data-export-section-label > small { font-size: 12px; }
   .data-export-privacy { padding: 12px; }
-  .data-export-privacy p { font-size: 8px; }
+  .data-export-privacy p { font-size: 13px; }
   .data-export-footer { gap: 10px; }
-  .data-export-footer > span { font-size: 8px; }
-  .heading-actions .global-export-button { padding: 8px 10px; font-size: 10px; }
+  .data-export-footer > span { font-size: 12px; }
+  .heading-actions .global-export-button { padding: 8px 10px; font-size: 14px; }
 }

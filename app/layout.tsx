@@ -5,6 +5,7 @@ import "./components/components.css";
 import "./components/local-wechat.css";
 import "./components/auto-reply.css";
 import "./components/data-export.css";
+import "./green-theme.css";
 
 export const metadata: Metadata = {
   title: "客序 · 商家经营工作台",
