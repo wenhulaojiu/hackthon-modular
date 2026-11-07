@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFile, access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { appendFile, access, mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 export const projectRoot = fileURLToPath(new URL('../../', import.meta.url));
 export const localRoot = path.join(projectRoot, '.local-wechat');
@@ -242,6 +242,15 @@ async function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+// 比较真实文件路径，兼容Windows桌面别名及目录联接；导入模块时不执行安装。
+export async function isDirectSetupInvocation(entry = process.argv[1], moduleUrl = import.meta.url) {
+  if (!entry) return false;
+  try {
+    const [entryPath, modulePath] = await Promise.all([realpath(path.resolve(entry)), realpath(fileURLToPath(moduleUrl))]);
+    return process.platform === 'win32' ? entryPath.toLowerCase() === modulePath.toLowerCase() : entryPath === modulePath;
+  } catch { return false; }
+}
+
+if (await isDirectSetupInvocation()) {
   main().catch(error => { console.error(error.message || '无法启动安装器。'); process.exitCode = 1; });
 }

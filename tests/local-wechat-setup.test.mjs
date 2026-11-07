@@ -1,14 +1,44 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { archiveExtractionCode, isPythonAlias } from '../scripts/local-wechat/setup.mjs';
+import { archiveExtractionCode, isDirectSetupInvocation, isPythonAlias } from '../scripts/local-wechat/setup.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const scratch = path.join(root, 'work', 'setup-regression');
 const expected = 'wechat-chat-export-synthetic';
+
+test('安装器通过真实路径识别目录联接入口，模块导入和错误入口不触发安装', async () => {
+  await mkdir(scratch, { recursive: true });
+  const directory = await mkdtemp(path.join(scratch, 'invocation-'));
+  const physical = path.join(directory, '真实中文目录');
+  const alias = path.join(directory, '桌面别名');
+  await mkdir(physical);
+  const script = path.join(physical, 'setup.mjs');
+  const other = path.join(physical, 'other.mjs');
+  await writeFile(script, '// 合成入口，不执行安装。\n', 'utf8');
+  await writeFile(other, '// 合成导入入口。\n', 'utf8');
+  try {
+    await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const moduleUrl = pathToFileURL(script).href;
+    assert.equal(await isDirectSetupInvocation(script, moduleUrl), true);
+    assert.equal(await isDirectSetupInvocation(path.join(alias, 'setup.mjs'), moduleUrl), true);
+    assert.equal(await isDirectSetupInvocation(script, pathToFileURL(path.join(alias, 'setup.mjs')).href), true);
+    assert.equal(await isDirectSetupInvocation(other, moduleUrl), false);
+    assert.equal(await isDirectSetupInvocation(path.join(directory, 'missing.mjs'), moduleUrl), false);
+    assert.equal(await isDirectSetupInvocation('', moduleUrl), false);
+    assert.equal(await isDirectSetupInvocation(script, 'https://invalid.example/setup.mjs'), false);
+  } finally {
+    await unlink(alias).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    const base = await realpath(scratch);
+    const target = await realpath(directory);
+    const relative = path.relative(base, target);
+    assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+    await rm(target, { recursive: true, force: true });
+  }
+});
 const python = (() => {
   const candidates = process.env.KEXU_TEST_PYTHON ? [[process.env.KEXU_TEST_PYTHON, []]] : process.platform === 'win32' ? [['py.exe', ['-3']], ['python.exe', []]] : [['python3', []], ['python', []]];
   for (const [command, prefix] of candidates) {
