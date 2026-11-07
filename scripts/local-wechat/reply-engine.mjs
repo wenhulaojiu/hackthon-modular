@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat, lstat } from "node:fs/promises
 import path from "node:path";
 import { assertAdditiveEnrollment, isEnrollmentChatId } from "./reply-enrollment.mjs";
 import { GenerationError, normalizeGenerationFailure } from "./reply-generation-errors.mjs";
+import { unverifiedReplyAmounts } from "../../lib/reply-money-core.mjs";
 
 export const DEFAULT_WELCOME_MESSAGE = "您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。";
 
@@ -29,7 +30,6 @@ const clock = (value) => typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\
 const safeId = (value) => text(value, 200) && !/[\u0000-\u001f]/.test(value);
 const privateId = (value) => safeId(value) && value !== "filehelper" && !value.endsWith("@chatroom");
 const validDate = (value) => text(value, 80) && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
-const amountStrings = (value) => Array.from(value.matchAll(/(?:[¥￥]\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*元)/g), (match) => Number(match[1] || match[2]));
 
 function faqList(value, max = 100) {
   if (!Array.isArray(value) || value.length > max || value.some((item) => !item || !text(item.question, 500) || !text(item.answer, 4000))) fail("常见问题资料格式不正确。");
@@ -277,6 +277,13 @@ export async function createReplyEngine(options = {}) {
     });
   }
 
+  function contextForJob(next, job) {
+    const history = next.history[job.chatId] || [];
+    const end = history.findIndex(message => message.id === job.message.id);
+    // 找不到本批截止消息时只信原始本批，不能把更新的聊天预算用于旧任务。
+    return end < 0 ? [] : history.slice(0, end + 1).slice(-20).map(({ sender, text, date }) => ({ sender, text: text.slice(0, 4000), date }));
+  }
+
   async function reserveWork(limit = 2) {
     if (!armed || closed) return [];
     await chain;
@@ -297,9 +304,7 @@ export async function createReplyEngine(options = {}) {
           continue;
         }
         job.status = "generating"; job.leaseId = randomUUID(); job.leaseUntil = now() + leaseMs; job.configRevision = next.configRevision; job.updatedAt = iso();
-        const history = next.history[job.chatId] || [];
-        const end = history.findIndex((message) => message.id === job.message.id);
-        const context = history.slice(0, end < 0 ? history.length : end + 1).slice(-20).map(({ sender, text, date }) => ({ sender, text: text.slice(0, 4000), date }));
+        const context = contextForJob(next, job);
         jobs.push({ id: job.id, leaseId: job.leaseId, customerId: job.customerId, message: copy(job.message), messages: copy(job.messages || [job.message]), context });
         capacity -= 1;
       }
@@ -312,15 +317,15 @@ export async function createReplyEngine(options = {}) {
     return { action: value.action, reply: value.reply.trim(), reason: value.reason, productIds: value.productIds || [] };
   }
 
-  function outputBlock(next, result) {
+  function outputBlock(next, job, result) {
     if (!result.reply || result.reply.length > next.config.settings.maxReplyChars) return "回复为空或超过配置长度。";
     if (/已为您退款|已经退款|已退款|已改价|已调整价格|保证有效|一定有效|百分之百|100%/.test(result.reply)) return "回复包含未经人工授权的操作或效果承诺。";
     const products = next.config.products.filter((product) => product.enabled);
     if (result.productIds.some((id) => !products.some((product) => product.id === id))) return "回复引用了未启用的商品或服务。";
-    const money = new Set(products.filter((product) => product.price !== null).map((product) => product.price));
-    const facts = [...next.config.settings.faq.map((faq) => faq.answer), next.config.settings.storeInfo?.serviceContent || '', ...products.flatMap((product) => [product.description, ...product.faq.map((faq) => faq.answer)])];
-    for (const fact of facts) for (const value of amountStrings(fact)) money.add(value);
-    if (amountStrings(result.reply).some((amount) => !money.has(amount))) return "回复中的价格不在已配置门店资料中。";
+    const facts = [...products.filter(product => product.price !== null).map(product => `${product.price}元`), ...next.config.settings.faq.map(faq => faq.answer), next.config.settings.storeInfo?.serviceContent || '', ...products.flatMap(product => [product.description, ...product.faq.map(faq => faq.answer)])];
+    // 客户预算只用于本次接待的明确预算表述，主动跟进不能借聊天预算放行新报价。
+    const customerTexts = !job.kind || job.kind === "reply" ? [...(job.messages || [job.message]).map(message => message.text), ...contextForJob(next, job).filter(message => message.sender === "customer").map(message => message.text)] : [];
+    if (unverifiedReplyAmounts(result.reply, facts, customerTexts).length) return "回复中的价格不在已配置门店资料中。";
     return "";
   }
 
@@ -346,7 +351,7 @@ export async function createReplyEngine(options = {}) {
         job.status = "ignored"; job.reason = result.reason; job.updatedAt = iso(); delete job.leaseId; delete job.leaseUntil; delete job.reply; delete job.productIds;
         return publicJob(job);
       }
-      const denied = outputBlock(next, result);
+      const denied = outputBlock(next, job, result);
       if (denied) { setHandoff(next, job, denied); return publicJob(job); }
       job.reply = result.reply; job.productIds = result.productIds; job.reason = result.reason; job.status = armed && next.config.settings.mode === "auto" ? "ready" : "draft"; job.updatedAt = iso(); delete job.leaseId;
       return publicJob(job);
@@ -368,7 +373,7 @@ export async function createReplyEngine(options = {}) {
           const blocked = manual ? manualGate(next, job) : gate(next, job);
           if (blocked) { if (blocked.action !== "defer") setHandoff(next, job, blocked.reason); continue; }
           if (!manual && job.kind !== "welcome" && job.configRevision !== next.configRevision && !job.manuallyApproved) { setHandoff(next, job, "发送前门店资料已变化，请人工审核。"); continue; }
-          const denied = manual || job.kind === "welcome" ? "" : outputBlock(next, { reply: job.reply, productIds: job.productIds || [] });
+          const denied = manual || job.kind === "welcome" ? "" : outputBlock(next, job, { reply: job.reply, productIds: job.productIds || [] });
           if (denied) { setHandoff(next, job, denied); continue; }
           job.status = "sending"; job.updatedAt = iso(); job.sendStartedAt = iso();
           return { jobId: job.id, chatId: job.chatId, text: job.reply, idempotencyKey: manual ? `manual:${job.requestId}` : job.id, manual };
@@ -537,7 +542,7 @@ export async function createReplyEngine(options = {}) {
       const job = { id: randomUUID(), kind: "followup", taskId: input.taskId, customerId: customer.id, chatId: customer.wechatId, message, messages: [copy(message)], reply: input.text, status: "ready", quietUntil: now(), configRevision: next.configRevision, manuallyApproved: true, createdAt: iso(), updatedAt: iso(), reason: "商家已批准本次跟进，按现有私聊队列顺序发送。" };
       const blocked = gate(next, job);
       if (blocked && blocked.action !== "defer") fail(blocked.reason, 409);
-      const denied = outputBlock(next, { reply: job.reply, productIds: [] });
+      const denied = outputBlock(next, job, { reply: job.reply, productIds: [] });
       if (denied) fail(denied);
       if (next.jobs.length >= 5000 || Object.keys(next.followupOnce).length >= 5000) fail("主动跟进队列或防重记录已满，未提交新的发送。", 503);
       next.jobs.push(job);
@@ -766,6 +771,8 @@ export async function createReplyEngine(options = {}) {
       if (!armed || typeof send !== "function") fail("回复引擎或发送适配器尚未启动。", 409);
       const blocked = gate(next, job, false);
       if (blocked) fail(blocked.reason, 409);
+      const denied = job.kind === "welcome" ? "" : outputBlock(next, job, { reply: job.reply, productIds: job.productIds || [] });
+      if (denied) fail(denied, 409);
       job.status = "ready"; job.updatedAt = iso(); job.reason = "商户已审核，等待发送。"; job.manuallyApproved = true;
       return publicJob(job);
     });

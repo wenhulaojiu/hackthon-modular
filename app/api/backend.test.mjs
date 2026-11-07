@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { createReplyEngine } from "../../scripts/local-wechat/reply-engine.mjs";
 
 const project = fileURLToPath(new URL("../../", import.meta.url));
 const nativeRequire = createRequire(import.meta.url);
@@ -41,7 +44,8 @@ function fixture(bindings = {}) {
     if (loaded.has(absolute)) return loaded.get(absolute).exports;
     const output = ts.transpileModule(readFileSync(absolute, "utf8"), {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
-      fileName: absolute,
+      // 测试加载器统一编译为CommonJS；.mjs扩展名会让TypeScript保留ESM输出。
+      fileName: absolute.endsWith('.mjs') ? `${absolute.slice(0, -4)}.ts` : absolute,
     }).outputText;
     const module = { exports: {} };
     loaded.set(absolute, module);
@@ -49,10 +53,10 @@ function fixture(bindings = {}) {
       if (specifier === "cloudflare:workers") return { env: environment };
       if (specifier === "@/app/chatgpt-auth") return { getChatGPTUser: async () => identity.getStore() ? { userId: identity.getStore(), email: `${identity.getStore()}@test.invalid` } : null };
       if (specifier === "@/db") return { getDb: () => drizzle(d1, { schema }) };
-      if (specifier.startsWith("@/")) return load(`${specifier.slice(2)}.ts`);
+      if (specifier.startsWith("@/")) return load(/\.(?:ts|mjs)$/.test(specifier) ? specifier.slice(2) : `${specifier.slice(2)}.ts`);
       if (specifier.startsWith(".")) {
         const target = path.resolve(path.dirname(absolute), specifier);
-        return load(target.endsWith(".ts") ? target : `${target}.ts`);
+        return load(/\.(?:ts|mjs)$/.test(target) ? target : `${target}.ts`);
       }
       return nativeRequire(specifier);
     };
@@ -1574,5 +1578,84 @@ test('本地登录或同源拒绝不冒充模型认证失败，不调用模型',
     assert.equal(crossOrigin.status, 403);
     assert.equal((await crossOrigin.json()).code, undefined);
     assert.equal(calls, 0);
+  } finally { f.close(); }
+});
+
+test('生产回复API到本机队列使用相同金额规则，历史20元预算可发送一次而商品20元假报价被拒绝', async t => {
+  const f = fixture(), temporary = await realpath(os.tmpdir());
+  const directory = await mkdtemp(path.join(temporary, 'kexu-api-engine-money-'));
+  let engine;
+  t.after(async () => {
+    await engine?.close();
+    const actual = await realpath(directory);
+    // 仅清理已核实位于系统临时目录中的本次合成测试目录。
+    assert.equal(path.dirname(actual).toLowerCase(), temporary.toLowerCase());
+    assert.ok(path.basename(actual).startsWith('kexu-api-engine-money-'));
+    await rm(actual, { recursive: true, force: true });
+  });
+  try {
+    await replyFixture(f);
+    const loaded = await f.server.loadState('alice');
+    const customer = { ...structuredClone(loaded.state.customers[0]), id: 'pipeline-customer', name: '合成链路客户', wechatId: 'wxid_pipeline_fixture', source: 'wechat', autoReplyEnabled: true, humanTakeover: false, summary: '', preferences: '', budget: '', note: '', tags: [], manualTags: [], evidence: [], messages: [] };
+    loaded.state.customers = [customer];loaded.state.orders = [];loaded.state.tasks = [];
+    loaded.state.products = [
+      { id: 'pipeline-roll', name: '合成软包', type: 'product', price: 10, stock: 9, enabled: true, description: '合成目录商品。', faq: [] },
+      { id: 'pipeline-black', name: '合成黑咖', type: 'product', price: 18, stock: 9, enabled: true, description: '合成目录商品。', faq: [] },
+    ];
+    loaded.state.settings.storeName = '合成链路门店';
+    loaded.state.replySettings = { ...loaded.state.replySettings, selectedCustomerIds: [customer.id], mode: 'review', welcomeEnabled: false, cooldownSeconds: 0, debounceSeconds: 0 };
+    await f.server.saveState('alice', loaded.state, loaded.revision);
+    const before = await f.server.loadState('alice');
+    const config = { settings: before.state.replySettings, customers: before.state.customers, products: before.state.products, storeName: before.state.settings.storeName, industry: before.state.settings.industry };
+    assert.ok(config.products.every(product => product.price !== 20));
+    assert.doesNotMatch(JSON.stringify(config), /20元/);
+    let clock = Date.parse('2026-11-08T01:00:00Z'), modelCalls = 0, forgedModelReply;
+    const sends = [];
+    t.mock.method(globalThis, 'fetch', async () => {
+      modelCalls++;
+      if (!forgedModelReply) throw Error('合成预算目录直答不得请求模型');
+      return modelResponse(forgedModelReply);
+    });
+    engine = await createReplyEngine({ directory, now: () => clock, tickMs: 10, send: async packet => { sends.push(packet);return { status: 'sent', messageId: `pipeline-native-${sends.length}` }; } });
+    await engine.syncConfig(config);await engine.start();
+    const incoming = (id, text) => ({ id, chatId: customer.wechatId, sender: 'customer', text, date: new Date(clock).toISOString(), source: 'realtime', kind: 'text' });
+    await engine.ingest(incoming('pipeline-budget', '预算20元。'));
+    const budgetWork = (await engine.claimWork()).jobs[0];assert.ok(budgetWork);
+    await engine.completeWork({ jobId: budgetWork.id, leaseId: budgetWork.leaseId, result: { action: 'ignore', reply: '', reason: '合成测试保留客户预算背景。', productIds: [] } });
+    clock += 1000;
+    await engine.ingest(incoming('pipeline-recommendation', '你好，有什么推荐'));
+    const work = (await engine.claimWork()).jobs[0];assert.ok(work);
+    assert.ok(work.context.some(turn => turn.sender === 'customer' && turn.text === '预算20元。'));
+    const apiBody = item => ({ customerId: item.customerId, message: item.message, ...(item.messages ? { messages: item.messages } : {}), context: item.context });
+    const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', apiBody(work))));
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.action, 'reply');assert.equal(modelCalls, 0);
+    assert.match(result.reply, /^20元以内，可以看看合成软包（10元）和合成黑咖（18元）。/);
+    assert.deepEqual(result.productIds, ['pipeline-roll', 'pipeline-black']);
+    const completed = await engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result });
+    assert.equal(completed.status, 'draft');
+    await engine.approve(work.id);
+    let sentState;
+    for (let count = 0; count < 400; count++) {
+      sentState = await engine.status();
+      if (sentState.counts.sent === 1) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(sentState.counts.sent, 1);assert.equal(sends.length, 1);
+    assert.equal(sends[0].text, result.reply);
+    clock += 1000;
+    await engine.ingest(incoming('pipeline-forged-price', '合成软包现在多少钱？'));
+    const forgedWork = (await engine.claimWork()).jobs[0];assert.ok(forgedWork);
+    forgedModelReply = { action: 'reply', reply: '合成软包20元。', reason: '合成错误报价。', productIds: ['pipeline-roll'], grounding: [{ sourceId: 'product:pipeline-roll', quote: '价格：10元' }] };
+    const rejectedResponse = await f.asUser('alice', () => f.replyRoute.POST(post('reply', apiBody(forgedWork))));
+    assert.equal(rejectedResponse.status, 200);
+    const apiRejected = await rejectedResponse.json();
+    assert.equal(apiRejected.action, 'handoff');assert.equal(apiRejected.reply, '');assert.equal(modelCalls, 1);
+    const engineRejected = await engine.completeWork({ jobId: forgedWork.id, leaseId: forgedWork.leaseId, result: forgedModelReply });
+    assert.equal(engineRejected.status, 'handoff');assert.match(engineRejected.reason, /价格不在已配置/);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(sends.length, 1);assert.equal((await engine.status()).counts.sent, 1);
+    assert.deepEqual(await f.server.loadState('alice'), before);
   } finally { f.close(); }
 });
