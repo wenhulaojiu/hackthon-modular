@@ -17,6 +17,103 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 const receipt = input => ({ status: 'sent', readback: true, messageId: '12345678901234567890', chatId: input.chatId, workspaceToken: input.workspaceToken, textSha256: createHash('sha256').update(input.text, 'utf8').digest('hex') });
 const extendedConfiguration = current => ({ ...structuredClone(current), settings: { ...structuredClone(current.settings), selectedCustomerIds: [...current.settings.selectedCustomerIds, 'customer-two'] }, customers: [...structuredClone(current.customers), { id: 'customer-two', wechatId: 'wxid_synthetic_second', autoReplyEnabled: true, humanTakeover: false }] });
 
+test('人工单次授权在自动接待暂停和空名单时可发送，自动配置及运行状态保持不变', async t => {
+  const f = await fixture(t); await f.enable();
+  const before = await f.readConfig();
+  const input = f.message({ idempotencyKey: 'manual:11111111-1111-4111-8111-111111111111', text: '人工回复可自行确认价格999元。' });
+  const result = await f.service.sendManual(input);
+  assert.equal(result.status, 'sent'); assert.equal(result.readback, true);
+  assert.deepEqual(await f.readConfig(), before);
+  assert.equal((await f.service.send(f.message())).status, 'failed');
+  const dispatch = f.calls.find(call => call.action === 'send-manual');
+  assert.ok(dispatch); assert.equal(dispatch.input.text, input.text);
+  const grantPath = path.join(path.dirname(f.filename), 'manual', `${createHash('sha256').update(input.idempotencyKey, 'utf8').digest('hex')}.json`);
+  const grant = JSON.parse(await readFile(grantPath, 'utf8'));
+  assert.equal(grant.kind, 'manual-once'); assert.equal(grant.chatId, input.chatId);
+  assert.equal(grant.textSha256, result.textSha256); assert.equal(grant.authorizationId, dispatch.input.generation);
+  assert.equal(grant.selfWxid, before.selfWxid); assert.equal(grant.pid, before.pid);
+  assert.ok(!('text' in grant)); assert.ok(!('running' in grant));
+  await f.service.sendManual(input);
+  assert.deepEqual(JSON.parse(await readFile(grantPath, 'utf8')), grant, '重复调用不能续期或覆盖授权');
+  assert.equal((await f.service.sendManual({ ...input, text: '另一份正文。' })).code, 'NATIVE_MANUAL_CONFLICT');
+});
+
+test('人工请求与自动请求共享发送锁，超时unknown也等实际worker退出，不扩大自动授权', async t => {
+  const entered = deferred(); const exit = deferred();
+  const f = await fixture(t, { sendTimeoutMs: 15, run: async (action, _args, input) => {
+    if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+    if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+    entered.resolve(); await exit.promise; return receipt(input);
+  } });
+  await f.enable(); await f.service.start(configuration());
+  const before = await f.readConfig();
+  const pending = f.service.sendManual(f.message({ idempotencyKey: 'manual:22222222-2222-4222-8222-222222222222' }));
+  await entered.promise; assert.equal((await pending).status, 'unknown');
+  assert.equal((await f.service.send(f.message())).code, 'NATIVE_SEND_BUSY');
+  assert.equal((await f.service.sendManual(f.message({ idempotencyKey: 'manual:33333333-3333-4333-8333-333333333333' }))).code, 'NATIVE_SEND_BUSY');
+  assert.deepEqual(await f.readConfig(), before);
+  const status = await f.service.status({ probe: true }); assert.equal(status.ready, true);
+  const grantPath = path.join(path.dirname(f.filename), 'manual', `${createHash('sha256').update('manual:22222222-2222-4222-8222-222222222222').digest('hex')}.json`);
+  assert.equal(JSON.parse(await readFile(grantPath, 'utf8')).kind, 'manual-once', 'caller超时不能删掉worker仍需读取的授权');
+  exit.resolve();
+});
+
+test('人工授权在管理器重建后沿用原授权ID与期限，不能重新签发同一请求', async t => {
+  const f = await fixture(t); await f.enable();
+  const input = f.message({ idempotencyKey: 'manual:44444444-4444-4444-8444-444444444444' });
+  await f.service.sendManual(input);
+  const grantPath = path.join(path.dirname(f.filename), 'manual', `${createHash('sha256').update(input.idempotencyKey).digest('hex')}.json`);
+  const original = await readFile(grantPath, 'utf8');
+  await f.service.close();
+  const reopened = createNativeSenderService({ root: f.root, workspace, currentWorkspace: () => workspace.workspaceToken, platform: 'win32', run: async (_action, _args, body) => receipt(body), now: () => Date.now() + 200_000 });
+  try {
+    assert.equal((await reopened.sendManual(input)).status, 'sent');
+    assert.equal(await readFile(grantPath, 'utf8'), original);
+    assert.equal((await f.readConfig()).running, false);
+  } finally { await reopened.close(); }
+});
+
+test('人工发送期间暂停自动服务仍可确认，关闭组件或切换账号后的迟到回执不能为sent', async t => {
+  for (const kind of ['pause', 'disable', 'workspace']) await t.test(kind, async subtest => {
+    const entered = deferred(); const exit = deferred();
+    const f = await fixture(subtest, { run: async (action, _args, input) => {
+      if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+      if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+      entered.resolve(); await exit.promise; return receipt(input);
+    } });
+    await f.enable(); const pending = f.service.sendManual(f.message({ idempotencyKey: `manual-${kind}` })); await entered.promise;
+    if (kind === 'pause') await f.service.pause();
+    else if (kind === 'disable') assert.equal((await f.call('/disable', {})).status, 200);
+    else f.switchWorkspace('acct-aaaaaaaaaaaaaaaaaaaa@2');
+    exit.resolve(); assert.equal((await pending).status, kind === 'pause' ? 'sent' : 'unknown');
+    assert.equal((await f.readConfig()).running, false);
+  });
+});
+
+test('人工回复只接收300字及1023字节内有效文本，组件未启用时不创建授权', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.service.sendManual(f.message())).status, 'failed');
+  await f.enable();
+  for (const change of [{ text: '' }, { text: ' ' }, { text: 'a'.repeat(301) }, { text: '😀'.repeat(151) }, { text: '\0' }, { text: '\ud800' }, { chatId: 'filehelper' }, { chatId: 'gh_synthetic' }, { idempotencyKey: 'bad\nkey' }]) assert.equal((await f.service.sendManual(f.message(change))).status, 'failed');
+  assert.equal(f.calls.filter(call => call.action === 'send-manual').length, 0);
+});
+
+test('同步人工接管名单先等待在途自动发送回读，再修改generation且不误报unknown', async t => {
+  const entered = deferred(); const exit = deferred();
+  const f = await fixture(t, { run: async (action, _args, input) => {
+    if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+    if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+    entered.resolve(); await exit.promise; return receipt(input);
+  } });
+  await f.enable(); await f.service.start(configuration()); const before = await f.readConfig();
+  const pending = f.service.send(f.message()); await entered.promise;
+  const next = configuration(); next.customers[0].humanTakeover = true;
+  let synced = false; const synchronization = f.service.syncConfig(next).then(() => { synced = true; });
+  await new Promise(resolve => setTimeout(resolve, 5)); assert.equal(synced, false); assert.deepEqual(await f.readConfig(), before);
+  exit.resolve(); assert.equal((await pending).status, 'sent'); await synchronization;
+  const after = await f.readConfig(); assert.deepEqual(after.allowedChatIds, []); assert.equal(after.running, true); assert.equal(after.settingsGeneration, before.settingsGeneration + 1);
+});
+
 test('新增客户授权等待在途原生回读结束，保留运行状态且只增一次版本', async t => {
   const entered = deferred(); const exit = deferred();
   const f = await fixture(t, { run: async (action, _args, input) => {

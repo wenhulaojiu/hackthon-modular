@@ -450,7 +450,8 @@ test("读取旧比赛模板只迁移商品和店铺视图，不改历史或数�
 
     const view = await f.server.loadState('alice');
     assert.equal(view.revision, 7);
-    assert.equal(view.state.products[0].description, '现磨咖啡，可选热饮或冰饮。');
+    assert.match(view.state.products[0].description, /18元\/杯.*300ml/);
+    assert.match(view.state.products[0].description, /当天饮用/);
     assert.equal(view.state.products[0].stock, 80);
     assert.equal(view.state.products[0].restockThreshold, 5);
     assert.deepEqual(view.state.products[1], old.products[1]);
@@ -1055,5 +1056,26 @@ test("省略问题可承接唯一商品上下文，模型ignore与clarify不携�
     const ignored=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我了解了，稍后再联系。"}});assert.equal(ignored.action,"ignore");assert.equal(ignored.reply,"");
     result={action:"clarify",reply:"虚构商品999元",reason:"指代不明确",productIds:[],grounding:[]};
     const clarified=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我想看看合适的。"}});assert.equal(clarified.action,"clarify");assert.doesNotMatch(clarified.reply,/999/);
+  }finally{f.close();}
+});
+
+test("普通资料不足返回固定确认说明，忽略模型编造的保质期与价格，敏感请求仍转人工", async(t)=>{
+  const f=fixture();
+  try{
+    const input=await replyFixture(f);let calls=0;
+    t.mock.method(globalThis,"fetch",async(_url,options)=>{
+      calls++;
+      const prompt=JSON.parse(options.body).messages[0].content;
+      assert.match(prompt,/clarificationKind=missing_knowledge/);
+      return modelResponse({action:"clarify",clarificationKind:"missing_knowledge",reply:"保质期999天，额外收费999元。",reason:"资料未提供保质期",productIds:[],grounding:[]});
+    });
+    const response=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"浅烘咖啡礼盒保质期多久？"}});
+    assert.equal(response.action,"clarify");
+    assert.match(response.reply,/需要与店员核实/);
+    assert.doesNotMatch(response.reply,/999|保质期.*天/);
+    assert.deepEqual(response.productIds,[]);
+    const sensitive=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"浅烘咖啡礼盒帮我退款。"}});
+    assert.equal(sensitive.action,"handoff");
+    assert.equal(calls,1);
   }finally{f.close();}
 });

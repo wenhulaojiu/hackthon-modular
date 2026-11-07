@@ -116,6 +116,25 @@ def checked_config(root, token, filename, *, sending=False, payload=None):
     return bound, config
 
 
+def checked_manual_grant(root, token, filename, payload, *, check_expiry=False, clock=time.time):
+    bound, config = checked_config(root, token, filename)
+    if config.get("enabled") is not True:
+        fail("SENDER_PAUSED")
+    directory = Path(filename).parent / "manual"
+    if directory.is_symlink() or directory.resolve().parent != Path(filename).resolve().parent:
+        fail("MANUAL_GRANT_UNVERIFIED")
+    request_hash = digest(payload["idempotencyKey"].encode("utf-8"))
+    grant = read_json(directory / (request_hash + ".json"), maximum=8192)
+    fields = {"version", "kind", "workspaceToken", "selfWxid", "pid", "processCreated", "requestHash", "chatId", "textSha256", "authorizationId", "expiresAt"}
+    expected = {"version": 1, "kind": "manual-once", "workspaceToken": token, "selfWxid": config["selfWxid"], "pid": config["pid"], "processCreated": config["processCreated"], "requestHash": request_hash, "chatId": payload["chatId"], "textSha256": digest(payload["text"].encode("utf-8"))}
+    if not isinstance(grant, dict) or set(grant) != fields or any(grant.get(key) != value for key, value in expected.items()) or not isinstance(grant.get("authorizationId"), str) or not re.fullmatch(r"[0-9a-f-]{36}", grant["authorizationId"]) or payload.get("generation") != grant["authorizationId"] or type(grant.get("expiresAt")) is not int or grant["expiresAt"] <= 0 or payload["chatId"] == config["selfWxid"]:
+        fail("MANUAL_GRANT_UNVERIFIED")
+    # 过期只阻止新的原生调用；已提交的sent或unknown仍从持久防重日志返回。
+    if check_expiry and grant["expiresAt"] <= clock() * 1000:
+        fail("MANUAL_GRANT_EXPIRED")
+    return bound, config
+
+
 class Silent(io.TextIOBase):
     def write(self, value):
         return len(value)
@@ -277,9 +296,15 @@ def matching_ids(records, payload, own, baseline, start, end):
     return result
 
 
-def perform_send(root, token, filename, payload, *, runtime_factory=NativeRuntime, reader_factory=make_reader, clock=time.time, sleep=time.sleep, readback_seconds=25):
+def perform_send(root, token, filename, payload, *, runtime_factory=NativeRuntime, reader_factory=make_reader, clock=time.time, sleep=time.sleep, readback_seconds=25, manual=False):
     validate_payload(payload, token)
-    bound, config = checked_config(root, token, filename, sending=True, payload=payload)
+    if manual and (not payload["text"].strip() or len(payload["text"].encode("utf-16-le")) // 2 > 300 or payload["chatId"].startswith("gh_")):
+        fail("MANUAL_REQUEST_UNVERIFIED")
+    def authorization(dispatch=False):
+        if manual:
+            return checked_manual_grant(root, token, filename, payload, check_expiry=dispatch, clock=clock)
+        return checked_config(root, token, filename, sending=True, payload=payload)
+    bound, config = authorization()
     key = digest(payload["idempotencyKey"].encode("utf-8"))
     text_hash = digest(payload["text"].encode("utf-8"))
     journal_path = Path(filename).parent / "outbox.sqlite"
@@ -292,12 +317,13 @@ def perform_send(root, token, filename, payload, *, runtime_factory=NativeRuntim
             if old[0] != payload["chatId"] or old[1] != text_hash:
                 fail("IDEMPOTENCY_CONFLICT")
             return response(old[2], old[3], old[4])
+        bound, config = authorization(dispatch=True)
         runtime = runtime_factory(root)
         runtime.check(config)
         reader = reader_factory(bound, payload["chatId"])
         baseline = reader.read(int(clock()) - 2, int(clock()) + 1, timeout=10)
         baseline_ids = {item.get("nativeId") for item in baseline}
-        bound, config = checked_config(root, token, filename, sending=True, payload=payload)
+        bound, config = authorization(dispatch=True)
         runtime.check(config)
         start = int(clock())
         # 原生调用前即持久化未知状态；中断、进程重启或重复请求均不再发第二次。
@@ -308,18 +334,18 @@ def perform_send(root, token, filename, payload, *, runtime_factory=NativeRuntim
         try:
             if not runtime.invoke(config, payload["chatId"], payload["text"]):
                 fail("NATIVE_COMPLETION_UNVERIFIED")
-            checked_config(root, token, filename, sending=True, payload=payload)
+            authorization()
             runtime.check(config)
             deadline = clock() + readback_seconds
             while clock() < deadline:
-                checked_config(root, token, filename, sending=True, payload=payload)
+                authorization()
                 end = int(clock()) + 1
                 records = reader.read(start, end, timeout=min(10, max(0.1, deadline - clock())))
                 matches = matching_ids(records, payload, bound["selfWxid"], baseline_ids, start, end)
                 if len(matches) > 1:
                     fail("READBACK_AMBIGUOUS")
                 if matches:
-                    checked_config(root, token, filename, sending=True, payload=payload)
+                    authorization()
                     runtime.check(config)
                     native = next(iter(matches))
                     break
@@ -346,19 +372,19 @@ MESSAGES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", nargs="?", default="inspect", choices=("inspect", "bind", "send"))
+    parser.add_argument("action", nargs="?", default="inspect", choices=("inspect", "bind", "send", "send-manual"))
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--workspace-token", required=True)
     parser.add_argument("--config", required=True, type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
-    dispatched = args.action == "send"
+    dispatched = args.action in ("send", "send-manual")
     try:
-        if args.action == "send":
+        if dispatched:
             raw = sys.stdin.buffer.read(16385)
             if len(raw) > 16384:
                 fail("REQUEST_UNVERIFIED")
-            result = perform_send(root, args.workspace_token, args.config, json.loads(raw.decode("utf-8")))
+            result = perform_send(root, args.workspace_token, args.config, json.loads(raw.decode("utf-8")), manual=args.action == "send-manual")
         else:
             verify_artifacts(root)
             if args.action == "bind":

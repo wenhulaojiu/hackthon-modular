@@ -303,3 +303,22 @@
 .reply-selection-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
 
 fieldset.reply-rules{margin:0;border:0;min-width:0}
+
+.reply-manual-composer { margin: 18px 0 0 42px; padding: 15px; border: 1px solid var(--kexu-line); border-radius: 10px; background: var(--kexu-panel); }
+.reply-manual-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+.reply-manual-heading h4 { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--kexu-ink); font-size: 13px; font-weight: 600; }
+.reply-manual-heading > span { font-size: 12px; color: var(--kexu-muted); overflow-wrap: anywhere; }
+.reply-manual-composer .field { margin: 0; }
+.reply-manual-composer textarea { min-height: 88px; font-size: 13px; resize: vertical; background: #fff; }
+.reply-manual-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.reply-manual-footer > span { color: var(--kexu-muted); font-size: 11px; }
+.reply-manual-footer .btn { flex: 0 0 auto; }
+.reply-manual-note { margin-top: 10px; color: #9b744d; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.reply-manual-note.sent { color: #608147; }
+.reply-manual-last { padding: 11px 12px; margin-bottom: 12px; border-radius: 7px; border: 1px solid var(--kexu-line); background: #fff; }
+.reply-manual-last > span { color: var(--kexu-muted); font-size: 11px; }
+.reply-manual-last p { margin-top: 4px; color: var(--kexu-ink); font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reply-manual-unknown { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--kexu-muted); }
+.reply-manual-unknown label { display: flex; align-items: center; gap: 6px; }
+.reply-manual-unknown input { accent-color: var(--kexu-accent); }
+@media (max-width: 720px) { .reply-manual-composer { margin-left: 0; padding: 13px; } .reply-manual-footer { flex-wrap: wrap; } .reply-manual-footer > span { flex: 1 0 100%; } .reply-manual-footer .btn { margin-left: auto; } }

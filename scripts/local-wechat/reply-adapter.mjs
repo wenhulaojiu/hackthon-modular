@@ -145,6 +145,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     const local = await reader.inspect();
     const canReceive = local.configured && local.pythonReady && local.exporterReady && local.databaseReady !== false && !local.message;
     let canSend = false;
+    let canManualSend = false;
     let configured = false;
     let target = null;
     let nativeInfo = null;
@@ -156,6 +157,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
         nativeInfo = await nativeStatus(probe);
         if (nativeInfo.configured) {
           canSend = nativeInfo.canSend === true;
+          canManualSend = canSend && typeof nativeSender.sendManual === 'function';
           message = typeof nativeInfo.message === 'string' ? nativeInfo.message.slice(0, 400) : '已选择内置原生后台发送器。';
         } else { target = null; configured = false; }
       }
@@ -166,9 +168,9 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
         canSend = await probeGateway(target, candidate);
         message = canSend ? target.type === scopedType ? '临时单会话测试网关已就绪，仅限已授权客户、五分钟内最多三条发送尝试。' : '已连接本机发送网关；发送后须按会话回读确认。' : '发送网关未报告稳定会话 ID、发送防重和消息回读能力。';
       } else if (target) message = '已配置本机发送网关，等待检测连接。';
-    } catch (error) { canSend = false; message = target?.type === 'native-background' ? '内置原生后台发送器暂不可用，请检查本机配置。' : error.message; }
+    } catch (error) { canSend = false; canManualSend = false; message = target?.type === 'native-background' ? '内置原生后台发送器暂不可用，请检查本机配置。' : error.message; }
     assertCurrent();
-    return { info: { configured, canReceive, canSend, type: 'exporter-poll', ...(target?.type === 'native-background' ? { mode: 'native-background', requiresForeground: false } : {}), message: lastError || message }, target };
+    return { info: { configured, canReceive, canSend, canManualSend, type: 'exporter-poll', ...(target?.type === 'native-background' ? { mode: 'native-background', requiresForeground: false } : {}), message: lastError || message }, target };
   }
 
   async function status(options) { return (await inspectStatus(options)).info; }
@@ -409,7 +411,39 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     return pending;
   }
 
+  async function sendManualOne({ chatId, text, idempotencyKey } = {}) {
+    try { assertCurrent(); } catch (error) { return { status: 'failed', error: error.message }; }
+    if (!isEnrollmentChatId(chatId) || typeof text !== 'string' || !text.trim() || text.length > 300 || !text.isWellFormed() || text.includes('\0') || Buffer.byteLength(text, 'utf8') > 1023 || typeof idempotencyKey !== 'string' || !/^manual:[0-9a-f-]{36}$/i.test(idempotencyKey)) return { status: 'failed', error: '手动回复的会话、正文或唯一请求编号不正确。' };
+    if (typeof nativeSender?.sendManual !== 'function') return { status: 'failed', error: '当前发送网关不支持单次手动回复，请使用已启用的原生后台发送组件。' };
+    const digest = createHash('sha256').update(text, 'utf8').digest('hex');
+    const previous = nativeAttempts.get(idempotencyKey);
+    if (previous) return previous.chatId === chatId && previous.textSha256 === digest ? previous.result : { status: 'failed', error: '同一手动请求不能更换会话或正文。' };
+    try {
+      await nativePause;
+      const current = await nativeStatus(true);
+      if (!current?.configured || !current.canSend) throw new Error();
+      assertCurrent();
+    } catch { return { status: 'failed', error: '本机原生发送组件尚未就绪，请启用并核对当前微信账号。' }; }
+    if (nativeAttempts.size >= 5000) return { status: 'failed', error: '本次发送记录已满，请先整理记录。' };
+    // 人工单次授权独立于自动接待开关，派发后结果不明也不改用其他网关或重发。
+    const attempt = { chatId, textSha256: digest, result: { status: 'unknown', error: '手动发送结果未知，请核对微信；不会重发。' } };
+    nativeAttempts.set(idempotencyKey, attempt);
+    try {
+      const result = await nativeSender.sendManual({ chatId, text, idempotencyKey });
+      assertCurrent();
+      if (result?.status === 'sent' && result.chatId === chatId && result.workspaceToken === workspace?.workspaceToken && result.readback === true && result.textSha256 === digest && typeof result.messageId === 'string' && /^[0-9]{1,40}$/.test(result.messageId) && /[1-9]/.test(result.messageId)) attempt.result = { status: 'sent', messageId: result.messageId };
+      else if (result?.status === 'failed') attempt.result = { status: 'failed', error: '原生组件未执行本次手动发送，请核对组件状态。' };
+    } catch { /* 已有单次尝试必须保持未知，不猜测是否送达。 */ }
+    return attempt.result;
+  }
+
+  function sendManual(input) {
+    const pending = sendQueue.then(() => sendManualOne(input));
+    sendQueue = pending.catch(() => {});
+    return pending;
+  }
+
   function pause() { paused = true; lifecycle += 1; probeCache = null; return pauseNative(); }
   function fail(error) { lastError = error?.message || '本地读取异常。'; return pause(); }
-  return { status, start, syncConfig, enrollCustomers, discover, poll, send, pause, fail };
+  return { status, start, syncConfig, enrollCustomers, discover, poll, send, sendManual, pause, fail };
 }

@@ -46,7 +46,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   });
   const generate = async (...args) => { assertCurrent(); const result = await generateReply(...args); assertCurrent(); return result; };
   const queueDirectory = path.join(root, '.local-wechat', 'replies', ...(workspace && workspace.id !== 'legacy' ? [workspace.id] : []));
-  const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, generate });
+  const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, ...(typeof adapter.sendManual === 'function' ? { sendManual: input => { assertCurrent(); return adapter.sendManual(input); } } : {}), generate });
 
   async function pause() {
     runEpoch += 1; pollController?.abort();
@@ -157,6 +157,29 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           try { assertCurrent(); await engine.start(); } catch (error) { await adapter.pause(); throw error; }
           void poll().catch(() => {});
         } else if (route === '/pause') { empty(); await pause(); }
+        else if (route === '/manual') {
+          if (!input || Array.isArray(input) || Object.keys(input).some(key => !['jobId', 'requestId', 'text'].includes(key)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.jobId || '') || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.requestId || '') || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 300 || !input.text.isWellFormed() || input.text.includes('\0') || Buffer.byteLength(input.text, 'utf8') > 1023) throw new LocalError(400, '手动回复仅接收原任务编号、唯一请求编号和300字以内的消息。');
+          const source = await engine.getJob(input.jobId);
+          if (!source) throw new LocalError(404, '原接待任务不存在，请刷新处理队列。');
+          // 客户身份只从当前工作区持久资料核对，浏览器不能指定另一位收件人。
+          const stateResponse = await requestLocalAPI(`${address.origin}/api/state`, { redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { Origin: address.origin, 'X-Kexu-Local': '1', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) } });
+          const saved = await stateResponse.json();
+          assertCurrent();
+          if (!stateResponse.ok || !Array.isArray(saved?.state?.customers)) throw new LocalError(503, '当前客户资料无法核验，未发送手动回复。');
+          const matches = saved.state.customers.filter(customer => customer.id === source.customerId);
+          if (matches.length !== 1 || matches[0].source === 'demo' || matches[0].wechatId !== source.chatId || saved.state.customers.filter(customer => customer.wechatId === source.chatId).length !== 1) throw new LocalError(409, '原任务必须唯一对应当前工作区的真实微信客户，未发送。');
+          const existing = await engine.getManualRequest(input);
+          if (existing && existing.status !== 'draft') { sendLocalJson(response, 200, { job: existing }); return true; }
+          if (typeof adapter.sendManual !== 'function' || !(await adapter.status({ probe: true })).canManualSend) throw new LocalError(409, '单次手动发送尚未就绪，请先启用并核对原生后台发送组件。');
+          assertCurrent();
+          const prepared = await engine.prepareManual({ ...input, text: input.text.trim() });
+          // 人工接管保存在本地引擎，不改动页面经营资料的revision与自动接待开关。
+          await adapter.syncConfig(await engine.getConfig());
+          assertCurrent();
+          const job = prepared.job.status === 'draft' ? await engine.dispatchManual(prepared.job.id) : prepared.job;
+          assertCurrent();
+          sendLocalJson(response, 200, { job }); return true;
+        }
         else if (route === '/followup') {
           if (!input || Array.isArray(input) || Object.keys(input).some(key => key !== 'taskId') || typeof input.taskId !== 'string' || !input.taskId || input.taskId.length > 160 || /[\u0000-\u001f]/.test(input.taskId)) throw new LocalError(400, '一键跟进只接收已保存的任务编号。');
           const ticket = runEpoch;

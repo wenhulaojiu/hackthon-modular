@@ -98,6 +98,54 @@ test("语境判断ignore保存原因且不发送不转人工，后续实质咨�
   assert.equal(generated[1].message.text, "咖啡礼盒多少钱？");
 });
 
+test("AI对本条资料不足转人工不会锁整段会话，下一条明确问题仍正常发送", async t => {
+  const generated = []; let sends = 0;
+  const { engine } = await fixture(t, {
+    generate: async work => { generated.push(work); return generated.length === 1 ? { action: "handoff", reply: "", reason: "商品资料没有提供具体口味，请人工确认本条问题。" } : goodReply; },
+    send: async () => ({ status: "sent", messageId: `synthetic-handoff-followup-${++sends}` }),
+  });
+  await engine.syncConfig(config()); await engine.start();
+  await engine.ingest(event("missing-flavour", "wxid_c1", { text: "礼盒里有什么口味？" }));
+  const first = await until(engine, state => state.counts.handoff === 1);
+  assert.deepEqual(first.takeovers, []); assert.equal(sends, 0);
+  await engine.ingest(event("known-price", "wxid_c1", { text: "那咖啡礼盒多少钱？" }));
+  const finished = await until(engine, state => state.counts.sent === 1);
+  assert.equal(generated.length, 2); assert.equal(sends, 1); assert.equal(finished.counts.handoff, 1);
+  assert.deepEqual(finished.takeovers, []);
+  assert.ok(generated[1].context.some(message => message.text === "礼盒里有什么口味？"));
+  assert.equal((await engine.ingest(event("known-price", "wxid_c1", { text: "那咖啡礼盒多少钱？" }))).duplicate, true);
+  assert.equal(sends, 1);
+});
+
+test("敏感门禁、明确手动接管和真实商家回复仍锁住后续问题", async t => {
+  for (const kind of ["sensitive", "manual", "merchant"]) {
+    let generated = 0;
+    const { engine } = await fixture(t, { generate: async () => { generated++; return goodReply; }, send: async () => { assert.fail("已接管会话不得发送"); } });
+    await engine.syncConfig(config()); await engine.start();
+    if (kind === "sensitive") await engine.ingest(event(`lock-${kind}`, "wxid_c1", { text: "我要申请退款。" }));
+    else if (kind === "manual") await engine.takeover({ customerId: "c1", enabled: true });
+    else await engine.ingest(event(`lock-${kind}`, "wxid_c1", { sender: "merchant", nativeMessageId: "synthetic-human-message", text: "这位客户由我接待。" }));
+    const result = await engine.ingest(event(`after-${kind}`, "wxid_c1", { text: "咖啡礼盒多少钱？" }));
+    assert.equal(result.status, "handoff");
+    assert.deepEqual((await engine.status()).takeovers, ["c1"]); assert.equal(generated, 0);
+  }
+});
+
+test("本条AI转人工不清除其他已有接管，重启也不自动释放旧接管", async t => {
+  const f = await fixture(t, { send: async () => { assert.fail("旧接管客户不得发送"); } });
+  await f.engine.syncConfig(config()); await f.engine.start();
+  await f.engine.takeover({ customerId: "c1", enabled: true });
+  await f.engine.ingest(event("one-off-handoff", "wxid_c2"));
+  const work = (await f.engine.claimWork()).jobs[0];
+  await f.engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result: { action: "handoff", reply: "", reason: "本条资料尚不完整，请人工确认。" } });
+  assert.deepEqual((await f.engine.status()).takeovers, ["c1"]);
+  await f.engine.close();
+  const reopened = await f.create();
+  await reopened.syncConfig(config()); await reopened.start();
+  assert.equal((await reopened.ingest(event("after-restart", "wxid_c1"))).status, "handoff");
+  assert.deepEqual((await reopened.status()).takeovers, ["c1"]);
+});
+
 test("语境不清使用clarify发送简短确认问题，后续回答带上确认上下文正常咨询", async t => {
   const clarify = { action: "clarify", reply: "请问您指的是哪款商品或哪项服务？", reason: "结合现有对话仍无法确定客户咨询对象。" };
   const generated = []; const sent = [];

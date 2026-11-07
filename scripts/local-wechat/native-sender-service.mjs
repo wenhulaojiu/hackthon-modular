@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { LocalError, guardLocalRequest, readLocalBody, sendLocalJson } from './service.mjs';
 import { assertAdditiveEnrollment } from './reply-enrollment.mjs';
@@ -68,6 +68,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
   let active = false;
   let requestedRunning = false;
   let epoch = 0;
+  let manualEpoch = 0;
   let control = Promise.resolve();
   let lastProbe = null;
   let probePromise = null;
@@ -132,6 +133,27 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
       await file.close(); file = null;
       await rename(temporary, filename);
     } finally { await file?.close(); await rm(temporary, { force: true }); }
+  }
+  async function manualGrant(current, { chatId, text, idempotencyKey }) {
+    const manualDirectory = path.join(scopeDirectory, 'manual');
+    await checkDirectory(manualDirectory, true);
+    const requestHash = createHash('sha256').update(idempotencyKey, 'utf8').digest('hex');
+    const target = path.join(manualDirectory, `${requestHash}.json`);
+    const expected = { version: 1, kind: 'manual-once', workspaceToken: workspace.workspaceToken, selfWxid: current.selfWxid, pid: current.pid, processCreated: current.processCreated, requestHash, chatId, textSha256: createHash('sha256').update(text, 'utf8').digest('hex') };
+    try {
+      const info = await lstat(target);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 8192) throw failure(503, '单次人工发送授权无法核验。', 'NATIVE_MANUAL_GRANT_INVALID');
+      const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readFile(target)));
+      if (!value || Array.isArray(value) || Object.keys(value).some(field => ![...Object.keys(expected), 'authorizationId', 'expiresAt'].includes(field)) || Object.entries(expected).some(([field, entry]) => value[field] !== entry) || typeof value.authorizationId !== 'string' || !/^[0-9a-f-]{36}$/.test(value.authorizationId) || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= 0) throw failure(409, '同一人工发送标识不能更换账号、客户或正文。', 'NATIVE_MANUAL_CONFLICT');
+      return value;
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if ((await readdir(manualDirectory)).length >= 5000) throw failure(503, '单次人工发送授权记录已满，请整理后再操作。', 'NATIVE_MANUAL_CAPACITY');
+    const grant = { ...expected, authorizationId: randomUUID(), expiresAt: now() + 120_000 };
+    // 单次授权与自动接待名单分开保存；同一请求永不覆盖或续期。
+    const handle = await open(target, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(grant) + '\n', 'utf8'); await handle.sync(); }
+    finally { await handle.close(); }
+    return grant;
   }
   async function installedFiles() {
     try {
@@ -212,6 +234,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     return { available: platform === 'win32', installed: !!installed, enabled: !!enabled, ready: !!ready, requiresForeground: false, mode: 'native-background', compatible: !!compatible, message, componentVersion: VERSION, source: 'helper', setupState: setup.state === 'idle' && installed ? 'ready' : setup.state, configured: !!config || invalid, canSend: !!ready };
   }
   async function enable() {
+    ++manualEpoch;
     active = false;
     requestedRunning = false;
     authorizationSignature = null;
@@ -248,6 +271,9 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     active = false;
     const turn = ++epoch;
     return serial(async () => {
+      assertCurrent();
+      // 先让已进入原生调用的发送安全回读，不能用新名单使其旧授权失效。
+      await sending.get(key)?.catch(() => {});
       assertCurrent();
       const current = await configFile();
       if (!current) return;
@@ -306,6 +332,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     });
   }
   function stop({ disable = false } = {}) {
+    if (disable) ++manualEpoch;
     active = false;
     requestedRunning = false;
     ++epoch;
@@ -322,29 +349,40 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     assertCurrent();
     return status();
   }
-  async function send({ chatId, text, idempotencyKey } = {}) {
+  async function dispatch({ chatId, text, idempotencyKey } = {}, manual = false) {
     let reservation;
     try {
       assertCurrent();
-      if (!active) return rejected('本地接待已暂停。');
+      if (!manual && !active) return rejected('本地接待已暂停。');
       if (!validChat(chatId) || typeof text !== 'string' || !text.isWellFormed() || !Buffer.byteLength(text, 'utf8') || Buffer.byteLength(text, 'utf8') > 1023 || text.includes('\0') || typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 200 || /[\u0000-\u001f\u007f]/.test(idempotencyKey)) return rejected('后台发送请求格式不正确。', 'NATIVE_PAYLOAD_INVALID');
+      if (manual && (platform !== 'win32' || !text.trim() || text.length > 300)) return rejected('人工回复需要可用的 Windows 组件和300字以内的正文。', 'NATIVE_MANUAL_PAYLOAD_INVALID');
       if (sending.has(key)) return rejected('另一条后台发送尚未结束，请先核对其结果。', 'NATIVE_SEND_BUSY');
       // 配置读取与登记发送保留在同一控制序列中，追加客户不会穿过预派发窗口。
       reservation = await serial(async () => {
         assertCurrent();
         const current = await configFile();
         assertCurrent();
-        if (!active || !current?.enabled || !current.running || current.workspaceToken !== workspace.workspaceToken || !current.allowedChatIds.includes(chatId) || chatId === current.selfWxid) return rejected('该客户未启用接待或当前接待已暂停。');
+        if (!current?.enabled || current.workspaceToken !== workspace.workspaceToken || chatId === current.selfWxid || !manual && (!active || !current.running || !current.allowedChatIds.includes(chatId))) return rejected(manual ? '请先启用并核验当前账号的后台发送组件。' : '该客户未启用接待或当前接待已暂停。');
         if (sending.has(key)) return rejected('另一条后台发送尚未结束，请先核对其结果。', 'NATIVE_SEND_BUSY');
         const digest = createHash('sha256').update(text, 'utf8').digest('hex');
-        const generationAtStart = current.settingsGeneration;
+        const grant = manual ? await manualGrant(current, { chatId, text, idempotencyKey }) : null;
+        if (sending.has(key)) return rejected('另一条后台发送尚未结束，请先核对其结果。', 'NATIVE_SEND_BUSY');
+        const generationAtStart = manual ? grant.authorizationId : current.settingsGeneration;
+        const manualTurn = manualEpoch;
         const task = Promise.resolve().then(async () => {
           // 已开始的只读预检先安全结束，之后的状态请求会被发送锁挡住。
           if (probePromise) await probePromise.promise.catch(() => {});
           assertCurrent();
-          if (!active) return rejected('本地接待已暂停。');
-          const result = await execute('send', args(), { workspaceToken: workspace.workspaceToken, chatId, text, idempotencyKey, generation: generationAtStart });
+          if (!manual && !active) return rejected('本地接待已暂停。');
+          if (manual && manualTurn !== manualEpoch) return rejected('人工发送授权已撤销，请核对组件状态。', 'NATIVE_MANUAL_REVOKED');
+          // 人工发送只消费本条授权，不启动收件，也不借用自动接待授权。
+          const result = await execute(manual ? 'send-manual' : 'send', args(), { workspaceToken: workspace.workspaceToken, chatId, text, idempotencyKey, generation: generationAtStart });
           assertCurrent();
+          if (manual) {
+            const latest = await configFile();
+            assertCurrent();
+            if (manualTurn !== manualEpoch || !latest?.enabled || latest.workspaceToken !== workspace.workspaceToken || latest.pid !== current.pid || latest.selfWxid !== current.selfWxid || latest.processCreated !== current.processCreated) return unknown('NATIVE_MANUAL_REVOKED');
+          }
           if (result?.status === 'failed') return rejected('后台发送组件拒绝了本次发送。', safeCode(result.code, 'NATIVE_SEND_REJECTED'));
           if (result?.status === 'sent' && result.chatId === chatId && result.workspaceToken === workspace.workspaceToken && result.readback === true && result.textSha256 === digest && typeof result.messageId === 'string' && /^[0-9]{1,40}$/.test(result.messageId) && /[1-9]/.test(result.messageId)) return { status: 'sent', messageId: result.messageId, chatId, textSha256: digest, readback: true, workspaceToken: workspace.workspaceToken };
           return unknown(safeCode(result?.code, 'NATIVE_RECEIPT_UNVERIFIED'));
@@ -361,6 +399,8 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     try { return await Promise.race([reservation.task, timed]); }
     finally { clearTimeout(timer); }
   }
+  const send = input => dispatch(input);
+  const sendManual = input => dispatch(input, true);
   async function setupComponent() {
     assertCurrent();
     if (platform !== 'win32') throw failure(503, '后台发送目前仅支持 Windows。', 'WINDOWS_REQUIRED');
@@ -402,5 +442,5 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     try { await stop(); }
     finally { await Promise.allSettled([...inflight]); }
   }
-  return { status, start, syncConfig, enrollCustomers, pause, send, handle, close };
+  return { status, start, syncConfig, enrollCustomers, pause, send, sendManual, handle, close };
 }

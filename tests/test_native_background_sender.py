@@ -155,6 +155,108 @@ class NativeSenderTests(unittest.TestCase):
         with closing(sqlite3.connect(self.config_path.parent / "outbox.sqlite")) as database:
             return database.execute("SELECT status,native_id,code FROM outbox").fetchone()
 
+    def prepare_manual(self, *, expires_at=None):
+        self.config["running"] = False
+        self.config["allowedChatIds"] = []
+        self.write_config()
+        self.payload["idempotencyKey"] = "manual:11111111-1111-4111-8111-111111111111"
+        self.payload["generation"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        request_hash = sender.digest(self.payload["idempotencyKey"].encode("utf-8"))
+        self.grant_path = self.config_path.parent / "manual" / (request_hash + ".json")
+        self.grant = {"version": 1, "kind": "manual-once", "workspaceToken": self.token, "selfWxid": SELF, "pid": self.config["pid"], "processCreated": self.config["processCreated"], "requestHash": request_hash, "chatId": TARGET, "textSha256": sender.digest(self.payload["text"].encode("utf-8")), "authorizationId": self.payload["generation"], "expiresAt": int(self.clock() * 1000 + 120000) if expires_at is None else expires_at}
+        self.write(self.grant_path, self.grant)
+
+    def test_manual_exact_grant_sends_while_auto_paused_without_changing_config(self):
+        self.prepare_manual()
+        before = self.config_path.read_text(encoding="utf-8")
+        result = self.send(manual=True)
+        self.assertEqual((result["status"], result["messageId"]), ("sent", "99112233"))
+        self.assertEqual(self.config_path.read_text(encoding="utf-8"), before)
+        self.assert_code("SENDER_PAUSED", self.send)
+        self.assertEqual(len(self.runtime.invocations), 1)
+
+    def test_manual_receipt_and_unknown_survive_reload_and_expiry_without_resending(self):
+        self.prepare_manual()
+        self.reader.records = []
+        expected = self.send(manual=True)
+        self.assertEqual(expected["status"], "unknown")
+        self.clock.value += 200
+        fresh = load_script("kexu_manual_sender_restart", "native-background-sender.py")
+        with patch.object(fresh, "local_reader_module", return_value=types.SimpleNamespace(shared=shared)):
+            self.assertEqual(self.send(module=fresh, manual=True), expected)
+        self.assertEqual(len(self.runtime.invocations), 1)
+
+    def test_manual_confirmed_receipt_is_reused_after_module_reload_and_expiry(self):
+        self.prepare_manual()
+        expected = self.send(manual=True)
+        self.assertEqual(expected["status"], "sent")
+        self.clock.value += 200
+        fresh = load_script("kexu_manual_confirmed_restart", "native-background-sender.py")
+        with patch.object(fresh, "local_reader_module", return_value=types.SimpleNamespace(shared=shared)):
+            self.assertEqual(self.send(module=fresh, manual=True), expected)
+        self.assertEqual(len(self.runtime.invocations), 1)
+        self.assertEqual(self.reader.calls, 2)
+
+    def test_manual_missing_grant_and_changed_live_process_block_before_native(self):
+        self.prepare_manual()
+        self.grant_path.unlink()
+        self.assert_code("CONFIG_UNVERIFIED", lambda: self.send(manual=True))
+        self.write(self.grant_path, self.grant)
+        self.runtime.live["processCreated"] = "18000000000000001"
+        self.assert_code("PROCESS_CHANGED", lambda: self.send(manual=True))
+        self.assertFalse(self.runtime.invocations)
+
+    def test_manual_expired_unconsumed_grant_cannot_dispatch(self):
+        self.prepare_manual(expires_at=int(self.clock() * 1000) - 1)
+        self.assert_code("MANUAL_GRANT_EXPIRED", lambda: self.send(manual=True))
+        self.assertFalse(self.runtime.invocations)
+        self.assertIsNone(self.journal_row())
+
+    def test_manual_grant_cannot_change_identity_target_body_or_authorization(self):
+        self.prepare_manual()
+        for field, value in [("pid", 9999), ("selfWxid", "wxid_other"), ("processCreated", "9999"), ("workspaceToken", "legacy@2"), ("chatId", "wxid_other"), ("textSha256", "f" * 64), ("authorizationId", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), ("requestHash", "f" * 64)]:
+            with self.subTest(field=field):
+                self.write(self.grant_path, {**self.grant, field: value})
+                self.assert_code("MANUAL_GRANT_UNVERIFIED", lambda: self.send(manual=True))
+        self.write(self.grant_path, self.grant)
+        self.assert_code("MANUAL_GRANT_UNVERIFIED", lambda: self.send({**self.payload, "text": "不同正文"}, manual=True))
+        self.assert_code("CONFIG_PATH_UNVERIFIED", lambda: sender.checked_manual_grant(self.root, self.token, self.grant_path, self.payload))
+        self.assertFalse(self.runtime.invocations)
+
+    def test_manual_pause_auto_during_readback_does_not_revoke_exact_grant(self):
+        self.prepare_manual()
+        def change_auto():
+            self.config["settingsGeneration"] += 1
+            self.config["running"] = False
+            self.config["allowedChatIds"] = []
+            self.write_config()
+        self.reader.on_readback = change_auto
+        self.assertEqual(self.send(manual=True)["status"], "sent")
+        self.assertEqual(len(self.runtime.invocations), 1)
+
+    def test_manual_disable_after_native_stays_unknown_and_does_not_retry(self):
+        self.prepare_manual()
+        def disable():
+            self.config["enabled"] = False
+            self.write_config()
+        self.runtime.on_invoke = disable
+        result = self.send(manual=True)
+        self.assertEqual((result["status"], result["code"]), ("unknown", "SENDER_PAUSED"))
+        self.config["enabled"] = True
+        self.write_config()
+        self.assertEqual(self.send(manual=True), result)
+        self.assertEqual(len(self.runtime.invocations), 1)
+
+    def test_manual_uses_utf16_length_limit_and_global_send_lock(self):
+        self.payload["text"] = "😀" * 151
+        self.prepare_manual()
+        self.assert_code("MANUAL_REQUEST_UNVERIFIED", lambda: self.send(manual=True))
+        self.payload["text"] = "人工回复"
+        self.prepare_manual()
+        with sender.send_lock(self.private / "native-sender/send.lock"):
+            self.assert_code("SEND_BUSY", lambda: self.send(manual=True))
+        self.assertFalse(self.runtime.invocations)
+
     def test_exact_native_evidence_confirms_single_send(self):
         result = self.send()
         self.assertEqual(result["status"], "sent")

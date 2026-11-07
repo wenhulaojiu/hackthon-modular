@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createCompetitionDemo, DEMO_WELCOME, migrateCompetitionCatalog } from '../lib/competition-demo.ts';
+import { createCompetitionDemo, DEMO_BREAD_DETAILS, DEMO_WELCOME, migrateCompetitionCatalog } from '../lib/competition-demo.ts';
 import type { AppState, Customer, Product } from '../lib/types.ts';
 
 const now = new Date('2026-11-07T06:00:00.000Z');
@@ -126,6 +126,72 @@ test('演示目录提供16商品和6服务，价格、说明与FAQ可以用于�
   }
   assert.equal(catalog.find(item => item.name === '美式咖啡')?.price, 18);
   assert.equal(catalog.find(item => item.name === '花艺体验')?.price, 168);
+});
+
+test('商品补充风味规格保存资料，面包使用已确认的口味和两天保质期', () => {
+  const catalog = createCompetitionDemo(emptyState(), now).products!;
+  for (const item of catalog) {
+    assert.ok(item.description.length >= 90, item.name);
+    assert.ok(item.faq.length >= 3, item.name);
+    assert.doesNotMatch(item.description, /比赛演示资料/);
+  }
+  assert.match(DEMO_BREAD_DETAILS.description, /原味奶香软面包/);
+  assert.match(DEMO_BREAD_DETAILS.description, /10元\/个.*80g/);
+  assert.match(DEMO_BREAD_DETAILS.description, /小麦.*奶和蛋/);
+  assert.match(DEMO_BREAD_DETAILS.description, /未开封常温密封保质期2天/);
+  assert.match(DEMO_BREAD_DETAILS.description, /开封后建议当天食用/);
+  assert.ok(DEMO_BREAD_DETAILS.faq.some(item => /怎么保存|能放多久/.test(item.question) && /2天/.test(item.answer)));
+  for (const name of ['美式咖啡', '燕麦拿铁', '桂花拿铁', '柠檬冷萃', '季节水果茶']) assert.match(catalog.find(item => item.name === name)!.description, /当天/);
+  assert.match(catalog.find(item => item.name === '巴斯克蛋糕')!.description, /0–4℃冷藏.*保质期2天/);
+  assert.match(catalog.find(item => item.name === '挂耳咖啡礼盒')!.description, /保质期12个月/);
+  for (const item of catalog.filter(item => item.type === 'service')) assert.match(item.description, /预约|沟通|确认/);
+  for (const name of ['手作香氛蜡烛', '帆布手提袋', '鲜花小束']) assert.doesNotMatch(catalog.find(item => item.name === name)!.description, /食品保质期|保质期\d/);
+});
+
+test('旧目录按字段精确补全，不覆盖手改说明FAQ价格库存或任何历史消息', () => {
+  const fresh = createCompetitionDemo(state(), now);
+  const input = structuredClone(fresh);
+  const coffee = input.products!.find(item => item.name === '美式咖啡')!;
+  coffee.description = '【比赛演示资料】现磨咖啡，可选热饮或冰饮。';
+  coffee.faq = [{ question: '现在有货吗？', answer: '当日余量请通过微信咨询；标记待补货的商品需人工确认。' }];
+  coffee.price = 19;
+  coffee.stock = 123;
+  coffee.restockThreshold = 8;
+  const flower = input.products!.find(item => item.name === '花艺体验')!;
+  flower.description = '店员手改花艺说明，不要覆盖。';
+  flower.faq = [{ question: '如何预约？', answer: '请至少提前一天通过微信留言预约，具体时段以人工确认为准。' }];
+  const croissant = input.products!.find(item => item.name === '原味可颂')!;
+  croissant.description = '每日烘焙，含小麦、奶及蛋；过敏信息请先咨询。';
+  croissant.faq = [{ question: '人工问题', answer: '人工答案保留。' }];
+  const before = structuredClone(input);
+  const result = migrateCompetitionCatalog(freeze(input));
+  const migrated = result.products!.find(item => item.name === '美式咖啡')!;
+  assert.equal(migrated.description, fresh.products!.find(item => item.name === '美式咖啡')!.description);
+  assert.deepEqual(migrated.faq, fresh.products!.find(item => item.name === '美式咖啡')!.faq);
+  assert.equal(migrated.price, 19);
+  assert.equal(migrated.stock, 123);
+  assert.equal(migrated.restockThreshold, 8);
+  assert.equal(result.products!.find(item => item.name === '花艺体验')!.description, flower.description);
+  assert.deepEqual(result.products!.find(item => item.name === '花艺体验')!.faq, fresh.products!.find(item => item.name === '花艺体验')!.faq);
+  assert.equal(result.products!.find(item => item.name === '原味可颂')!.description, fresh.products!.find(item => item.name === '原味可颂')!.description);
+  assert.deepEqual(result.products!.find(item => item.name === '原味可颂')!.faq, croissant.faq);
+  assert.equal(result.products![0], input.products![0]);
+  assert.equal(result.customers, input.customers);
+  assert.equal(result.orders, input.orders);
+  assert.equal(result.tasks, input.tasks);
+  assert.deepEqual(input, before);
+  assert.equal(migrateCompetitionCatalog(result), result);
+});
+
+test('人工商品和未知虚拟资料不套用模板，独立加载不共享FAQ对象', () => {
+  const input = createCompetitionDemo(emptyState(), now);
+  input.products!.push({ ...product('manual-bread'), name: '面包', price: 10, source: 'manual', description: '需要购买的时候', faq: [] });
+  input.products!.push({ ...product('unknown-demo'), name: '店员自建商品', source: 'demo', description: '【比赛演示资料】自填说明保留。' });
+  assert.equal(migrateCompetitionCatalog(input), input);
+  const first = createCompetitionDemo(emptyState(), now);
+  first.products![0].faq[0].answer = '改变一个结果不能污染后续创建';
+  const second = createCompetitionDemo(emptyState(), now);
+  assert.notEqual(second.products![0].faq[0].answer, first.products![0].faq[0].answer);
 });
 
 test('演示交易、退款与任务关联有效，全部声明虚拟证据', () => {
