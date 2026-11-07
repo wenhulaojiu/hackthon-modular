@@ -307,9 +307,11 @@ test("开发中间件阻止普通、编码和@fs形式的密钥、D1及本地聊
   const original = process.env.KEXU_LOCAL_WECHAT;
   process.env.KEXU_LOCAL_WECHAT = "1";
   const plugin = localWechatPlugin();
+  const temporary = await realpath(os.tmpdir());
+  const root = await mkdtemp(path.join(temporary, "kexu-plugin-test-"));
   let middleware;
   try {
-    plugin.configureServer({ config: { root: os.tmpdir() }, middlewares: { use(value) { middleware = value; } } });
+    plugin.configureServer({ config: { root }, middlewares: { use(value) { middleware = value; } } });
     for (const url of ["/.local-wechat/config.json", "/.dev.vars", "/.dev.vars.local", "/.env", "/.env.production", "/.wrangler/state/v3/d1/db.sqlite", "/.git/config", "/@fs/C:/project/.local-wechat/jobs/test/chat.json", "/@fs/C:/project/.wrangler/state/db.sqlite", "/%2elocal-wechat/config.json", "/%252edev.vars", "/@fs/C:/project/%2eenv.local"]) {
       let next = false;
       const response = { statusCode: 200, end() {} };
@@ -319,6 +321,10 @@ test("开发中间件阻止普通、编码和@fs形式的密钥、D1及本地聊
     }
   } finally {
     await plugin.closeBundle();
+    const actual = await realpath(root);
+    assert.equal(path.dirname(actual).toLowerCase(), temporary.toLowerCase());
+    assert.ok(path.basename(actual).startsWith("kexu-plugin-test-"));
+    await rm(actual, { recursive: true, force: true });
     if (original === undefined) delete process.env.KEXU_LOCAL_WECHAT;
     else process.env.KEXU_LOCAL_WECHAT = original;
   }

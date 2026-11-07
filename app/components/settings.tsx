@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Database, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Store, Trash2, Unplug } from 'lucide-react';
 import type { Settings as StoreSettings, SettingsProps } from '../../lib/types';
+import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from './reply-ui';
 
 const DEFAULT_PROMPTS = {
   profilePrompt: '你是商家的客户洞察助手。请根据提供的客户聊天记录生成有证据支持的客户画像。只使用聊天中明确提及的信息，不要猜测职业、收入、健康或其他敏感属性。信息不足时标记为未知。返回 JSON：summary（客户概况）、tags（需求及偏好标签数组）、preferences（产品与服务偏好）、budget（明确表达的预算或消费习惯）。',
@@ -48,7 +49,7 @@ export default function Settings({ state, onChange, notify, onAI, hasApiKey, onS
       if (removeKey) await onSaveKey('', true);
       else if (apiKey.trim()) await onSaveKey(apiKey.trim());
       const next = { ...draft, storeName: draft.storeName.trim(), industry: draft.industry.trim(), ai: { ...draft.ai, baseUrl: draft.ai.baseUrl.trim().replace(/\/$/, ''), model: draft.ai.model.trim() } };
-      onChange({ ...stateRef.current, settings: next }); savedRef.current = JSON.stringify(next); setDraft(next); setApiKey(''); setRemoveKey(false); notify('设置已保存'); return true;
+      if (!await onChange({ ...stateRef.current, settings: next })) return false; savedRef.current = JSON.stringify(next); setDraft(next); setApiKey(''); setRemoveKey(false); notify('设置已保存'); return true;
     } catch (error) { notify(error instanceof Error ? error.message : '设置保存失败，请重试', true); return false; }
     finally { setSaving(false); }
   };
@@ -63,10 +64,20 @@ export default function Settings({ state, onChange, notify, onAI, hasApiKey, onS
   };
 
   const resetPrompt = () => { if (window.confirm('将当前提示词恢复为默认内容？未保存的修改会被替换。')) { updateAI(activePrompt, DEFAULT_PROMPTS[activePrompt]); notify('已恢复默认提示词，保存后生效'); } };
-  const clearData = () => {
+  const clearData = async () => {
     if (!window.confirm('确定清空全部客户、聊天、消费记录、导入历史和待办？店铺设置及 API 配置会保留，此操作无法撤销。')) return;
-    const current = stateRef.current;
-    onChange({ ...current, customers: [], orders: [], tasks: [], imports: [], demo: false }); notify('业务数据已清空，店铺设置已保留');
+    try {
+      if (localRepliesAvailable()) {
+        let runtime: { running: boolean } | null = null;
+        try { runtime = await replyRequest<{ running: boolean }>('/status'); } catch { /* 未启用本地接待时仍可管理工作台数据。 */ }
+        if (runtime?.running) await replyRequest('/pause', {});
+      }
+      const current = stateRef.current;
+      const next = { ...current, customers: [], orders: [], tasks: [], imports: [], demo: false, replySettings: { ...replySettingsFor(current), enabled: false, selectedCustomerIds: [] } };
+      if (!await onChange(next)) return;
+      if (localRepliesAvailable()) { try { await replyRequest('/config', replyConfigFor(next)); } catch { notify('业务数据已清空，回复总开关已关闭；本机同步未确认，请检查自动回复中心', true); return; } }
+      notify('业务数据已清空，店铺设置已保留，自动回复已关闭');
+    } catch (error) { notify(error instanceof Error ? error.message : '未能暂停本地接待，数据尚未清空', true); }
   };
 
   return <div className="settings-page"><div className="page-heading"><div><h1>店铺设置</h1><p className="muted">让客序更了解你的生意，也更贴合你的工作方式。</p></div><button className="btn primary" disabled={saving || !dirty} onClick={() => save()}>{saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}{saving ? '保存中…' : '保存设置'}</button></div>

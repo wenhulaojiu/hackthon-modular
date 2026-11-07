@@ -1,12 +1,17 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFile, access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { appendFile, access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const projectRoot = fileURLToPath(new URL('../../', import.meta.url));
 export const localRoot = path.join(projectRoot, '.local-wechat');
 export const upstreamCommit = 'd82f241e88e9357dc3a553c958ef516605bb85be';
+
+// 只排除商店启动占位程序，不能误伤包目录内已验证可用的真实 Python。
+export function isPythonAlias(filename) {
+  return /[\\/]WindowsApps[\\/]python(?:3(?:\.\d+)?)?\.exe$/i.test(filename);
+}
 
 export function ensureRuntime() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('请先安装 Node.js 24 或更新版本，再重新运行。');
@@ -80,12 +85,8 @@ export async function runLogged(executable, args, logger, options = {}) {
   });
 }
 
-function powershellPath() {
-  return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-}
-
 async function probePython(executable, prefix = []) {
-  if (path.isAbsolute(executable) && /[\\/]WindowsApps[\\/]/i.test(executable)) return null;
+  if (path.isAbsolute(executable) && isPythonAlias(executable)) return null;
   const source = 'import json,sys,sqlite3,struct; print(json.dumps({"path":sys.executable,"major":sys.version_info.major,"minor":sys.version_info.minor,"deserialize":hasattr(sqlite3.Connection,"deserialize"),"bits":struct.calcsize("P")*8}))';
   return await new Promise(resolve => {
     const child = spawn(executable, [...prefix, '-c', source], { cwd: projectRoot, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
@@ -98,7 +99,7 @@ async function probePython(executable, prefix = []) {
       clearTimeout(timeout);
       try {
         const value = JSON.parse(output.trim());
-        if (code === 0 && value.major === 3 && value.minor >= 11 && value.deserialize && value.bits === 64 && path.isAbsolute(value.path) && !/[\\/]WindowsApps[\\/]/i.test(value.path)) resolve(value.path);
+        if (code === 0 && value.major === 3 && value.minor >= 11 && value.deserialize && value.bits === 64 && path.isAbsolute(value.path) && !isPythonAlias(value.path)) resolve(value.path);
         else resolve(null);
       } catch { resolve(null); }
     });
@@ -121,7 +122,7 @@ async function findPython() {
     let output = '';
     child.stdout.on('data', chunk => { output += chunk.toString('utf8'); });
     child.once('error', () => resolve([]));
-    child.once('close', () => resolve(output.split(/\r?\n/).map(value => value.trim()).filter(value => path.isAbsolute(value) && !/[\\/]WindowsApps[\\/]/i.test(value))));
+    child.once('close', () => resolve(output.split(/\r?\n/).map(value => value.trim()).filter(value => path.isAbsolute(value) && !isPythonAlias(value))));
   });
   for (const candidate of candidates) { const valid = await probePython(candidate); if (valid) return valid; }
   throw new Error('未找到可用的64位 Python 3.11+。请自行安装官方 Python 后重试，或通过 KEXU_PYTHON 指定解释器绝对路径。安装器不会安装系统 Python、自动提权或关闭防护。');
@@ -135,7 +136,42 @@ async function validateExporter(root) {
   return root;
 }
 
-async function prepareExporter(logger, previous) {
+export function archiveExtractionCode() {
+  return `import json,re,shutil,stat,sys,zipfile
+from pathlib import Path,PurePosixPath
+archive,folder,expected=sys.argv[1:]
+root=Path(folder).resolve()
+seen=set()
+total=0
+count=0
+with zipfile.ZipFile(archive) as source:
+ entries=source.infolist()
+ if len(entries)>2000: raise ValueError('Archive contains too many entries')
+ for entry in entries:
+  name=entry.filename.replace('\\\\','/')
+  parts=PurePosixPath(name).parts
+  if not parts or parts[0]!=expected or name.startswith('/') or any(p in ('.','..') or ':' in p or p.endswith((' ','.')) for p in parts): raise ValueError('Unsafe archive path')
+  if any(re.fullmatch(r'(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?',p) for p in parts): raise ValueError('Reserved Windows filename')
+  if stat.S_ISLNK(entry.external_attr>>16): raise ValueError('Archive symlinks are not allowed')
+  if entry.file_size>20000000: raise ValueError('Archive entry is too large')
+  total+=entry.file_size
+  if total>100000000: raise ValueError('Archive is too large')
+  relative=parts[1:]
+  if not relative: continue
+  identity='/'.join(relative).casefold()
+  if identity in seen: raise ValueError('Duplicate archive entry')
+  seen.add(identity)
+  target=root.joinpath(*relative).resolve()
+  if not target.is_relative_to(root): raise ValueError('Archive path escaped destination')
+  if entry.is_dir(): target.mkdir(parents=True,exist_ok=True)
+  else:
+   target.parent.mkdir(parents=True,exist_ok=True)
+   with source.open(entry) as data,target.open('xb') as output: shutil.copyfileobj(data,output)
+   count+=1
+print(json.dumps({'source_files':count,'safe_unpack':True}))`;
+}
+
+async function prepareExporter(logger, previous, basePython) {
   if (process.env.KEXU_EXPORTER_ROOT) return await validateExporter(process.env.KEXU_EXPORTER_ROOT);
   if (previous?.exporterRoot && await exists(previous.exporterRoot)) return await validateExporter(previous.exporterRoot);
   const toolsRoot = path.join(localRoot, 'tools');
@@ -162,12 +198,11 @@ async function prepareExporter(logger, previous) {
   const staging = path.join(toolsRoot, `.install-${randomUUID()}`);
   await writeFile(archive, Buffer.concat(chunks), { flag: 'wx' });
   await mkdir(staging);
-  await runLogged(powershellPath(), ['-NoProfile', '-NonInteractive', '-Command', 'Expand-Archive -LiteralPath $env:KEXU_INSTALL_ARCHIVE -DestinationPath $env:KEXU_INSTALL_STAGE'], logger, { env: { KEXU_INSTALL_ARCHIVE: archive, KEXU_INSTALL_STAGE: staging } });
-  const children = await readdir(staging);
   const expected = `wechat-chat-export-${upstreamCommit}`;
-  if (children.length !== 1 || children[0] !== expected) throw new Error('下载包目录与指定提交不一致，未安装工具。');
-  await validateExporter(path.join(staging, expected));
-  await rename(path.join(staging, expected), destination);
+  const unpack = archiveExtractionCode();
+  await runLogged(basePython, ['-c', unpack, archive, staging, expected], logger);
+  await validateExporter(staging);
+  await rename(staging, destination);
   await writeJsonAtomic(path.join(localRoot, 'installed-tool.json'), { commit: upstreamCommit, exporterRoot: destination, installedAt: new Date().toISOString() });
   return destination;
 }
@@ -178,7 +213,7 @@ async function main() {
   try {
     const previous = await readJson(path.join(localRoot, 'config.json'), null);
     const basePython = await findPython();
-    const exporterRoot = await prepareExporter(logger, previous);
+    const exporterRoot = await prepareExporter(logger, previous, basePython);
     const environment = path.join(localRoot, 'venv');
     const pythonPath = path.join(environment, 'Scripts', 'python.exe');
     if (await exists(environment)) {

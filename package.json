@@ -16,7 +16,7 @@
     "wechat:setup": "node scripts/local-wechat/setup.mjs",
     "package:local": "node scripts/package-local.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/local-wechat.test.mjs app/api/backend.test.mjs && node --experimental-strip-types --test tests/domain.test.ts"
+    "test": "node --test tests/*.test.mjs app/api/backend.test.mjs && node --experimental-strip-types --test tests/domain.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

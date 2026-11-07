@@ -44,8 +44,8 @@ function send(response, status, data) {
   response.end(JSON.stringify(data));
 }
 
-async function body(request) {
-  if (Number(request.headers["content-length"]) > 8192) { request.resume(); throw new LocalError(413, "请求内容过大。"); }
+async function body(request, maximumBytes = 8192) {
+  if (Number(request.headers["content-length"]) > maximumBytes) { request.resume(); throw new LocalError(413, "请求内容过大。"); }
   const bytes = await new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
@@ -53,7 +53,7 @@ async function body(request) {
     request.on("data", (chunk) => {
       if (settled) return;
       total += chunk.length;
-      if (total > 8192) { settled = true; reject(new LocalError(413, "请求内容过大。")); return; }
+      if (total > maximumBytes) { settled = true; reject(new LocalError(413, "请求内容过大。")); return; }
       chunks.push(chunk);
     });
     request.once("end", () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks)); } });
@@ -392,5 +392,30 @@ export function createLocalWechatService(options = {}) {
     jobs.clear();
   }
 
-  return { handle, close };
+  async function readForReplies(chatIds) {
+    // 接待轮询复用会话白名单、范围与完整性校验，不能绕过历史提取保护。
+    for (const id of chatIds) {
+      if ((conversations.get(id) || 0) <= now()) {
+        const result = await list(id);
+        if (!result.chats.some(chat => chat.id === id)) throw new LocalError(400, "接待白名单包含无法确认的好友会话。");
+      }
+    }
+    const day = new Date(now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const { jobId } = await startExport({ chatIds, start: day, end: day });
+    const job = jobs.get(jobId);
+    await active?.done;
+    try {
+      if (job?.status !== "complete" || !job.exports) throw new LocalError(503, job?.error || "新消息读取未完成，接待已暂停。");
+      return structuredClone(job.exports);
+    } finally {
+      clearTimeout(job?.expiry);
+      if (job) delete job.exports;
+      jobs.delete(jobId);
+    }
+  }
+
+  return { handle, close, inspect, readForReplies };
 }
+
+// 自动回复接口复用同一回环、同源和请求体保护，不另开公网监听。
+export { LocalError, body as readLocalBody, guard as guardLocalRequest, send as sendLocalJson };

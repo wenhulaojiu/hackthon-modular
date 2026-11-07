@@ -66,6 +66,7 @@ function fixture() {
     stateRoute: load("app/api/state/route.ts"),
     secretRoute: load("app/api/secret/route.ts"),
     aiRoute: load("app/api/ai/route.ts"),
+    replyRoute: load("app/api/reply/route.ts"),
     asUser: (user, work) => identity.run(user, work),
     close: () => sqlite.close(),
   };
@@ -396,6 +397,95 @@ test("支付卡片、红包、引用与转发不能成为AI交易证据，截去
       }
       assert.deepEqual(await f.server.loadState("alice"), beforeAI);
       stored = beforeAI;
+    }
+  } finally { f.close(); }
+});
+
+async function replyFixture(f) {
+  const loaded = await f.server.loadState("alice");
+  const customer = loaded.state.customers[0];
+  customer.autoReplyEnabled = true;
+  loaded.state.products = [{ id: "p-coffee", name: "浅烘咖啡礼盒", type: "product", price: 268, description: "双拼浅烘咖啡，简洁包装。", faq: [], enabled: true }];
+  loaded.state.replySettings = { enabled: true, mode: "auto", selectedCustomerIds: [customer.id], businessHours: { enabled: false, start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] }, faq: [], handoffKeywords: ["退款", "改价"], maxReplyChars: 300, cooldownSeconds: 30, prompt: "自然简短回复。" };
+  await f.server.saveState("alice", loaded.state, loaded.revision);
+  await f.server.storeKey("alice", "sk-unit-only-0123456789");
+  return { customerId: customer.id, message: { id: "live-message-1", text: "浅烘咖啡礼盒多少钱？", date: new Date().toISOString() }, context: [] };
+}
+
+test("旧schemaVersion1仍兼容，新增商品与回复规则可持久化", async () => {
+  const f = fixture();
+  try {
+    const initial = await f.server.loadState("alice");
+    assert.equal(initial.state.products, undefined);
+    assert.equal(initial.state.replySettings, undefined);
+    await replyFixture(f);
+    const updated = await f.server.loadState("alice");
+    assert.equal(updated.state.schemaVersion, 1);
+    assert.equal(updated.state.products[0].price, 268);
+    assert.equal(updated.state.replySettings.enabled, true);
+  } finally { f.close(); }
+});
+
+test("客服回复必须引用门店真实资料，只返回建议且不写订单或状态", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f);
+    const before = await f.server.loadState("alice");
+    let call;
+    t.mock.method(globalThis, "fetch", async (url, options) => {
+      call = JSON.parse(options.body);
+      return modelResponse({ action: "reply", reply: "这款浅烘咖啡礼盒268元，采用简洁包装。", reason: "根据已配置商品资料。", productIds: ["p-coffee"], grounding: [{ sourceId: "product:p-coffee", quote: "浅烘咖啡礼盒" }] });
+    });
+    const result = await f.server.runReplyAI("alice", input);
+    assert.equal(result.action, "reply");
+    assert.match(result.reply, /268元/);
+    assert.equal(result.grounding, undefined);
+    assert.match(call.messages[0].content, /不执行主动营销/);
+    assert.ok(JSON.parse(call.messages[1].content).knowledge.some((source) => source.id === "product:p-coffee"));
+    assert.deepEqual(await f.server.loadState("alice"), before);
+  } finally { f.close(); }
+});
+
+test("退款改价、停用客户、人工接管和闭店都不调用模型", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f);
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async () => { calls += 1; throw new Error("不应调用"); });
+    assert.equal((await f.server.runReplyAI("alice", { ...input, message: { ...input.message, text: "帮我退款或者改价吧" } })).action, "handoff");
+    for (const change of [
+      (state) => { state.replySettings.enabled = false; },
+      (state) => { state.customers[0].humanTakeover = true; },
+      (state) => { state.replySettings.selectedCustomerIds = []; },
+      (state) => { state.replySettings.businessHours = { enabled: true, start: "00:00", end: "00:00", days: [0, 1, 2, 3, 4, 5, 6] }; },
+    ]) {
+      const loaded = await f.server.loadState("alice");
+      change(loaded.state);
+      await f.server.saveState("alice", loaded.state, loaded.revision);
+      assert.equal((await f.server.runReplyAI("alice", input)).action, "handoff");
+    }
+    assert.equal(calls, 0);
+  } finally { f.close(); }
+});
+
+test("回复缺少真实依据、虚构价格或未知商品时转人工而不返回可发送文字", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f);
+    let mocked;
+    t.mock.method(globalThis, "fetch", async () => modelResponse(mocked));
+    const valid = { action: "reply", reply: "浅烘咖啡礼盒268元。", reason: "商品资料。", productIds: ["p-coffee"], grounding: [{ sourceId: "product:p-coffee", quote: "浅烘咖啡礼盒" }] };
+    for (const result of [
+      { ...valid, grounding: [] },
+      { ...valid, grounding: [{ sourceId: "product:p-coffee", quote: "商家没有提供过的资料" }] },
+      { ...valid, reply: "浅烘咖啡礼盒1元。" },
+      { ...valid, productIds: ["unknown-product"] },
+      { ...valid, reply: "已经退款，100%有效。" },
+    ]) {
+      mocked = result;
+      const reply = await f.server.runReplyAI("alice", input);
+      assert.equal(reply.action, "handoff");
+      assert.equal(reply.reply, "");
     }
   } finally { f.close(); }
 });

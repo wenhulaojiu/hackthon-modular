@@ -3,6 +3,7 @@ import "./globals.css";
 import "./kexu.css";
 import "./components/components.css";
 import "./components/local-wechat.css";
+import "./components/auto-reply.css";
 
 export const metadata: Metadata = {
   title: "客序 · 商家经营工作台",
