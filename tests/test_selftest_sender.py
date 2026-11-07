@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "local-wechat" / "selftest-sender.py"
@@ -183,6 +184,65 @@ class SelftestSenderTests(unittest.TestCase):
         self.assertFalse(result["gatewayRegistered"])
         bad = subprocess.run([sys.executable, str(SCRIPT), "prepare", "--text", "不允许正文"], capture_output=True, check=False)
         self.assertNotEqual(bad.returncode, 0)
+
+    def empty_history_result(self, **changes):
+        diagnostic = {"status": "needs_selection", "reason": "未找到名称完全一致且在本机有消息表的会话：filehelper；请使用 --list-chats 搜索，再用 --chat 传入准确会话 ID", "query": "filehelper", "candidates": [], **changes}
+        return subprocess.CompletedProcess([], 2, stdout=b"", stderr=json.dumps(diagnostic, ensure_ascii=False).encode("utf-8"))
+
+    def test_empty_history_requires_exact_structure_and_verified_exporter(self):
+        result = self.empty_history_result()
+        self.assertTrue(sender.exact_empty_helper_history(result, True))
+        self.assertFalse(sender.exact_empty_helper_history(result, False))
+        for change in ({"query": "wxid_customer"}, {"candidates": [{"username": "filehelper"}]}, {"reason": "其他读取失败"}, {"extra": True}):
+            self.assertFalse(sender.exact_empty_helper_history(self.empty_history_result(**change), True))
+        self.assertFalse(sender.exact_empty_helper_history(subprocess.CompletedProcess([], 1, stdout=b"", stderr=result.stderr), True))
+        self.assertFalse(sender.exact_empty_helper_history(subprocess.CompletedProcess([], 2, stdout=b"{}", stderr=result.stderr), True))
+
+    def test_pinned_reader_allows_empty_only_for_baseline(self):
+        script = self.root / "scripts" / "export_wechat.py"
+        script.parent.mkdir()
+        script.write_text("# 纯合成占位文件，不执行。\n", encoding="utf-8")
+        bound = sender.binding(self.root, self.token)
+        with self.assertRaises(sender.SelftestError):
+            sender.ExporterReader(bound)
+        with patch.object(sender, "EXPORTER_SHA256", sender.sha(script.read_text(encoding="utf-8"))):
+            reader = sender.ExporterReader(bound)
+        with patch.object(sender.subprocess, "run", return_value=self.empty_history_result()) as mocked:
+            self.assertEqual(reader.read(1, 2, allow_empty_history=True), [])
+            with self.assertRaises(sender.SelftestError) as raised:
+                reader.read(1, 2)
+            self.assertEqual(raised.exception.code, "READBACK_UNAVAILABLE")
+            self.assertEqual(mocked.call_count, 2)
+
+    def test_empty_baseline_followed_by_unavailable_readback_is_unknown_never_sent(self):
+        owner = self
+
+        class Target:
+            def __init__(self, _profile):
+                pass
+
+            def verify(self):
+                pass
+
+            def send_once(self, _text, check_binding):
+                check_binding()
+                owner.sends += 1
+
+        class Reader:
+            def __init__(self, _bound):
+                pass
+
+            def read(self, *_args, allow_empty_history=False, **_kwargs):
+                if allow_empty_history:
+                    return []
+                raise sender.SelftestError("READBACK_UNAVAILABLE", "合成发送后仍无本地记录")
+
+        result = sender.execute(self.root, self.token, self.prepared["id"], {}, reader_factory=Reader, target_factory=Target)
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["code"], "READBACK_UNAVAILABLE")
+        self.assertNotIn("nativeMessageId", result)
+        self.run_request()
+        self.assertEqual(self.sends, 1)
 
 
 if __name__ == "__main__":

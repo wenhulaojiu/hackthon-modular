@@ -1,0 +1,11 @@
+# 仅用于文件传输助手的可选本机视觉自测；不注册客户发送网关。
+pillow==13.0.0
+pywin32==312
+typing_extensions==4.16.0
+winrt-runtime==4.1.0
+winrt-Windows.Foundation==4!10.0.28000.2957
+winrt-Windows.Foundation.Collections==4!10.0.28000.2957
+winrt-Windows.Globalization==4!10.0.28000.2957
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2957
+winrt-Windows.Media.Ocr==4!10.0.28000.2957
+winrt-Windows.Storage.Streams==4!10.0.28000.2957

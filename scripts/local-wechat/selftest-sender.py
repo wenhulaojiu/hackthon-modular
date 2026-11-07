@@ -196,8 +196,9 @@ class ExporterReader:
         script_bytes = self.script.read_bytes()
         if len(script_bytes) > 2_000_000 or hashlib.sha256(script_bytes.replace(b"\r\n", b"\n")).hexdigest() != EXPORTER_SHA256:
             fail("EXPORTER_UNVERIFIED", "只读导出器未匹配已核验版本。")
+        self.script_verified = True
 
-    def read(self, start, end, timeout=20):
+    def read(self, start, end, timeout=20, allow_empty_history=False):
         binding(self.bound["root"], self.bound["token"])
         parent = self.bound["private"] / "selftest-sender" / self.bound["scope"]
         with tempfile.TemporaryDirectory(prefix="readback-", dir=parent) as temporary:
@@ -206,7 +207,11 @@ class ExporterReader:
                 fail("PRIVATE_DIRECTORY_INVALID", "自测读取临时目录越界。")
             iso = lambda value: datetime.fromtimestamp(value, timezone(timedelta(hours=8))).isoformat(timespec="seconds")
             command = [self.bound["config"]["pythonPath"], "-B", str(self.script), "--chat", CHAT_ID, "--start", iso(start), "--end", iso(end), "--output-root", str(folder), "--db-dir", str(self.bound["dbDir"])]
-            result = subprocess.run(command, cwd=self.bound["config"]["exporterRoot"], capture_output=True, timeout=max(0.1, min(20, timeout)), check=False, env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+            result = subprocess.run(command, cwd=self.bound["config"]["exporterRoot"], capture_output=True, timeout=max(0.1, min(20, timeout)), check=False, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0, env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+            # 仅基线允许已核验导出器的精确“filehelper尚无本地消息表”结构为空。
+            # 发送后的回读始终要求完整导出、摘要及原生消息ID，不能沿用此例外。
+            if allow_empty_history and exact_empty_helper_history(result, self.script_verified):
+                return []
             if result.returncode or len(result.stdout) > 256_000:
                 fail("READBACK_UNAVAILABLE", "文件传输助手只读回读未完成。")
             summary = json.loads(result.stdout.decode("utf-8"))
@@ -228,6 +233,17 @@ class ExporterReader:
             if validation.get("message_count") != len(data.get("messages", [])) or summary.get("messages") != len(data.get("messages", [])):
                 fail("READBACK_UNVERIFIED", "回读消息数量不一致。")
             return native_messages(data, start, end)
+
+
+def exact_empty_helper_history(result, script_verified):
+    if script_verified is not True or result.returncode != 2 or result.stdout.strip():
+        return False
+    try:
+        lines = [line for line in result.stderr.decode("utf-8").splitlines() if line.strip()]
+        diagnostic = json.loads(lines[-1])
+    except (UnicodeDecodeError, ValueError, IndexError, AttributeError):
+        return False
+    return diagnostic == {"status": "needs_selection", "reason": "未找到名称完全一致且在本机有消息表的会话：filehelper；请使用 --list-chats 搜索，再用 --chat 传入准确会话 ID", "query": "filehelper", "candidates": []}
 
 
 class WindowsUIATarget:
@@ -314,15 +330,17 @@ def execute(root, token, request_id, profile, timeout=45, reader_factory=Exporte
             return public_result(record, duplicate=True)
         if record["workspaceToken"] != token:
             fail("WORKSPACE_CHANGED", "该自测请求属于先前工作区代际，请重新准备。")
+        if profile.get("mode") == "visual-filehelper-only" and profile.get("workspaceToken") != token:
+            fail("WORKSPACE_CHANGED", "视觉校准不属于当前工作区，请重新校准。")
         try:
             target = target_factory(profile)
             target.verify()
             reader = reader_factory(bound)
             start, end = int(time.time()) - 30, int(time.time()) + 180
-            baseline = {item["nativeId"] for item in reader.read(start, end)}
+            baseline = {item["nativeId"] for item in reader.read(start, end, allow_empty_history=True)}
             binding(root, token)
         except Exception as error:
-            record.update(status="failed", code=error.code if isinstance(error, SelftestError) else "PRECHECK_FAILED")
+            record.update(status="failed", code=getattr(error, "code", "PRECHECK_FAILED"))
             persist()
             return public_result(record)
         # 在第一次编辑 UI 前落盘；任何异常、超时或进程退出都会阻止相同请求重发。
@@ -344,7 +362,7 @@ def execute(root, token, request_id, profile, timeout=45, reader_factory=Exporte
                 sleep(min(0.5, max(0, deadline - monotonic())))
             fail("READBACK_TIMEOUT", "未在限定时间内确认原生消息，结果未知。")
         except Exception as error:
-            record.update(status="unknown", code=error.code if isinstance(error, SelftestError) else "SEND_OR_READBACK_UNKNOWN")
+            record.update(status="unknown", code=getattr(error, "code", "SEND_OR_READBACK_UNKNOWN"))
             persist()
             return public_result(record)
 
@@ -354,13 +372,18 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["dependencies", "prepare", "execute", "status"], nargs="?", default="dependencies")
+    parser.add_argument("action", choices=["dependencies", "prepare", "execute", "status", "calibrate-visual", "inspect-visual"], nargs="?", default="dependencies")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--workspace-token")
     parser.add_argument("--chat-id", choices=[CHAT_ID], default=CHAT_ID)
     parser.add_argument("--request-id")
     parser.add_argument("--uia-profile", type=Path)
+    parser.add_argument("--target", choices=["uia", "visual"], default="uia")
+    parser.add_argument("--visual-recipe", type=Path)
+    parser.add_argument("--visual-profile", type=Path)
     parser.add_argument("--operator-confirmed-ui-account", action="store_true", help="操作者已人工确认界面账号及文件传输助手；工作区 token 不能证明界面登录账号")
+    parser.add_argument("--operator-confirmed-filehelper", action="store_true", help="操作者已亲眼确认当前为系统文件传输助手")
+    parser.add_argument("--operator-confirmed-empty-input", action="store_true", help="操作者已确认当前文件传输助手输入区为空")
     parser.add_argument("--timeout", type=int, default=45)
     args = parser.parse_args()
     try:
@@ -375,16 +398,52 @@ def main():
                 bound = binding(args.root, args.workspace_token)
                 with journal(bound) as (state, _):
                     result = {"requests": [public_result(record) for record in state["requests"].values()], "message": "状态查询不连接微信；inflight表示可能中断，禁止重发。"}
+            elif args.action in {"calibrate-visual", "inspect-visual"}:
+                from selftest_visual_target import LocalWindowsVision, WindowsVisualTarget, calibrate_visual, private_profile_path, write_private_profile
+                binding(args.root, args.workspace_token)
+                if args.action == "inspect-visual" and not args.visual_profile:
+                    result = {"status": "geometry-only", "identity": LocalWindowsVision().identity(), "message": "仅检查前台微信物理客户区坐标、进程和DPI，未截图、OCR、点击或输入。"}
+                    print(json.dumps(result, ensure_ascii=False))
+                    return 0
+                if not args.visual_profile:
+                    fail("ARGUMENT_REQUIRED", "请指定本机私有视觉校准文件。")
+                profile_path = private_profile_path(args.root, args.visual_profile)
+                if args.action == "calibrate-visual":
+                    if not args.visual_recipe or not args.operator_confirmed_ui_account or not args.operator_confirmed_filehelper or not args.operator_confirmed_empty_input:
+                        fail("EXPLICIT_CONFIRMATION_REQUIRED", "校准前须人工核对界面账号、系统助手、空输入区及局部坐标。")
+                    recipe = read_json(private_profile_path(args.root, args.visual_recipe))
+                    profile = calibrate_visual(recipe, args.workspace_token)
+                    binding(args.root, args.workspace_token)
+                    write_private_profile(profile_path, profile)
+                    result = {"status": "calibrated", "expiresInSeconds": 120, "message": "仅在本机读取标题、图标和空输入区局部像素并保存私有校准；未点击、未输入、未发送。", "clipboardNotice": "后续视觉execute会用固定自测标记覆盖剪贴板，不读取或恢复原内容。", "identity": profile["identity"]}
+                else:
+                    profile = read_json(profile_path)
+                    if profile.get("workspaceToken") != args.workspace_token:
+                        fail("WORKSPACE_CHANGED", "视觉校准不属于当前工作区。")
+                    WindowsVisualTarget(profile).verify()
+                    binding(args.root, args.workspace_token)
+                    result = {"status": "verified", "message": "只读局部复核通过，未输入或发送；该结果不代表稳定客户会话ID。"}
             else:
-                if not args.operator_confirmed_ui_account or not args.request_id or not args.uia_profile:
+                selected_profile = args.visual_profile if args.target == "visual" else args.uia_profile
+                if not args.operator_confirmed_ui_account or not args.request_id or not selected_profile:
                     fail("EXPLICIT_CONFIRMATION_REQUIRED", "真实自测须人工确认界面账号、请求编号及已验收UIA配置。")
-                result = execute(args.root, args.workspace_token, args.request_id, read_json(args.uia_profile), args.timeout)
+                if args.target == "visual":
+                    from selftest_visual_target import WindowsVisualTarget, private_profile_path
+                    if not args.operator_confirmed_filehelper:
+                        fail("EXPLICIT_CONFIRMATION_REQUIRED", "视觉自测还须人工确认当前为系统文件传输助手。")
+                    result = execute(args.root, args.workspace_token, args.request_id, read_json(private_profile_path(args.root, selected_profile)), args.timeout, target_factory=WindowsVisualTarget)
+                    result["targetProof"] = "operator-confirmed visual filehelper; no stable UI chat ID"
+                else:
+                    result = execute(args.root, args.workspace_token, args.request_id, read_json(selected_profile), args.timeout)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("status") not in {"failed", "unknown"} else 2
     except SelftestError as error:
         print(json.dumps({"status": "failed", "code": error.code, "error": str(error), "automaticRetry": False}, ensure_ascii=False))
         return 2
-    except Exception:
+    except Exception as error:
+        if getattr(error, "code", "").startswith(("VISUAL_", "FILEHELPER_", "LOCAL_OCR_")):
+            print(json.dumps({"status": "failed", "code": error.code, "error": str(error), "automaticRetry": False}, ensure_ascii=False))
+            return 2
         print(json.dumps({"status": "failed", "code": "LOCAL_SELFTEST_UNAVAILABLE", "error": "本地自测无法完成；未自动重试，请检查私有配置。", "automaticRetry": False}, ensure_ascii=False))
         return 2
 
