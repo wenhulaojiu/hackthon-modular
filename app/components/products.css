@@ -1,0 +1,27 @@
+.reply-product-actions { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+.reply-store-information .reply-card-title { margin-bottom: 18px; }
+.reply-store-information .reply-card-title h3 { color: var(--kexu-ink); }
+.reply-store-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.reply-store-fields .field { margin-bottom: 16px; font-size: 12px; }
+.reply-store-fields .input { font-size: 12px; }
+.reply-store-fields .reply-full-width { margin-top: 17px; }
+.reply-store-hours { padding: 16px 0; margin-bottom: 16px; border-top: 1px solid var(--kexu-line); border-bottom: 1px solid var(--kexu-line); }
+.reply-store-hours-heading { display: flex; align-items: center; gap: 8px; }
+.reply-store-hours-heading h4 { flex: 1; display: flex; align-items: center; gap: 7px; margin: 0; color: var(--kexu-ink); font-size: 12px; font-weight: 500; }
+.reply-store-hours > p { margin-top: 9px; color: var(--kexu-muted); font-size: 11px; line-height: 1.9; }
+.reply-store-information .reply-weekdays { flex-wrap: wrap; gap: 5px; }
+.reply-store-information .reply-weekdays button { width: 27px; }
+.reply-store-information .reply-time-range input { width: 100%; }
+.reply-knowledge-page .reply-business-aside { display: block; }
+.reply-product-editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.reply-product-restock { color: #a18256; font-size: 11px; white-space: nowrap; }
+.reply-store-welcome { padding-top: 17px; margin-top: 18px; border-top: 1px solid var(--kexu-line); }
+.reply-store-welcome-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.reply-store-welcome-heading h4 { margin: 0; color: var(--kexu-ink); font-size: 12px; font-weight: 500; }
+.reply-store-welcome > p { margin-top: 10px; color: var(--kexu-muted); font-size: 11px; line-height: 1.9; }
+.reply-store-welcome .field { margin: 11px 0 8px; }
+.reply-store-welcome-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.reply-store-welcome-actions .btn { font-size: 11px; padding: 7px 9px; }
+.reply-store-welcome-actions > span { color: var(--kexu-muted); font-size: 11px; white-space: nowrap; }
+.reply-store-welcome > p.reply-store-welcome-error { color: #a46b4a; }
+@media (max-width: 720px) { .reply-product-actions .btn { font-size: 12px; } }

@@ -40,7 +40,7 @@ export default function Overview({state,go}:SharedProps&{go:(id:PageId,customer?
    })}
   </svg>
  </div></section>
- <section className="card recent-card"><div className="card-heading"><div><h2>最近经营记录</h2><p>最近已确认的销售与退款</p></div><button className="icon-button" onClick={()=>go('inbox')} aria-label="核对消费与退款"><ArrowUpRight size={17}/></button></div>{recentOrders.length?<div className="recent-list">{recentOrders.map(order=>{
+ <section className="card recent-card"><div className="card-heading"><div><h2>最近经营记录</h2><p>最近已确认的销售与退款</p></div><button className="icon-button" onClick={()=>go('customers')} aria-label="查看客户消费"><ArrowUpRight size={17}/></button></div>{recentOrders.length?<div className="recent-list">{recentOrders.map(order=>{
   const customer=state.customers.find(item=>item.id===order.customerId);
   const refund=order.type==='refund';
   return <button type="button" className="recent-row" key={order.id} onClick={()=>go('customers',order.customerId)} aria-label={`${customer?.name||'客户'}，${refund?'退款':'销售'}，${humanDate(order.date)}，${currency(order.amount)}`}>

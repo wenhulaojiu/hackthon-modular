@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { assertAdditiveEnrollment, isEnrollmentChatId, isFriendAddedSystemText } from './reply-enrollment.mjs';
 
 // 收件复用只读导出组件；发送网关须由用户另行安装并在本机验收。
 export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace, nativeSender } = {}) {
@@ -14,6 +15,9 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   let configRevision = 0;
   let activeTransport = null;
   let nativePause = Promise.resolve();
+  let discoveryCursor = 0;
+  let probeCache = null;
+  const watermarks = new Map();
   const nativeAttempts = new Map();
   const scopedAttempts = new Map();
   const scopedType = 'scoped-test-http';
@@ -183,7 +187,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     if (next.settings.mode === 'auto' && !ready.canSend) throw new Error('自动发送尚未接通，请先使用草稿接待，或安装并验收本机发送网关。');
     const allowed = new Set(next.settings.selectedCustomerIds);
     const ids = next.customers.filter(c => allowed.has(c.id) && c.autoReplyEnabled && !c.humanTakeover).map(c => c.wechatId);
-    if (!ids.length || ids.length > 20 || new Set(ids).size !== ids.length) throw new Error('本地接待每次支持 1–20 位微信标识明确且不重复的好友。');
+    if ((!ids.length && !(next.settings.enabled === true && next.settings.autoEnrollNewContacts !== false)) || ids.length > 500 || new Set(ids).size !== ids.length) throw new Error('本地接待最多支持500位微信标识明确且不重复的好友；空名单需启用新私聊接待。');
     if (target?.type === 'native-background') {
       if (next.settings.enabled !== true || ids.some(id => !privateChatId(id) || next.customers.filter(customer => customer.wechatId === id).length !== 1)) throw new Error('请先启用规则，并核对原生发送的私聊白名单。');
       if (ready.canSend) {
@@ -199,18 +203,117 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     activeScopedGrant = target?.type === scopedType ? { key: grantKey(target), target } : null;
     // 原始消息为秒精度；取下一秒，避免处理启动前同一秒的旧消息。
     startedAt = Math.ceil(now() / 1000) * 1000;
+    probeCache = null; watermarks.clear();
     lastError = '';
     paused = false;
   }
 
   async function syncConfig(next) {
     assertCurrent();
-    if (JSON.stringify(config) !== JSON.stringify(next)) configRevision += 1;
+    if (JSON.stringify(config) !== JSON.stringify(next)) { configRevision += 1; probeCache = null; }
     config = next;
     try {
       if (nativeSender) await nativeSender.syncConfig(next);
       assertCurrent();
     } catch (error) { paused = true; lifecycle += 1; await pauseNative().catch(() => {}); throw error; }
+  }
+
+  async function enrollCustomers(next) {
+    assertCurrent();
+    if (paused || !config || activeScopedGrant) throw new Error('接待已暂停或属于临时单会话授权，不能自动扩大客户范围。');
+    assertAdditiveEnrollment(config, next);
+    const ticket = lifecycle, revision = configRevision;
+    // 与发送共用串行队列，原有请求核实结束后才扩大本次已授权的私聊范围。
+    const pending = sendQueue.then(async () => {
+      assertCurrent();
+      if (paused || ticket !== lifecycle || revision !== configRevision) throw new Error('接纳期间接待已暂停或规则变化，请重新核对。');
+      if (activeTransport === 'native-background') {
+        if (typeof nativeSender?.enrollCustomers !== 'function') throw new Error('原生组件尚不支持新私聊增量授权，请更新后重试。');
+        await nativeSender.enrollCustomers(next);
+        assertCurrent();
+      }
+      if (paused || ticket !== lifecycle || revision !== configRevision) throw new Error('接纳期间接待已暂停或规则变化，请重新核对。');
+      config = next;
+    });
+    sendQueue = pending.catch(() => {});
+    return pending;
+  }
+
+  async function readBatches(ids, ticket, revision) {
+    const snapshots = [];
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const batch = await reader.readForReplies(ids.slice(offset, offset + 20));
+      assertCurrent();
+      if (paused || ticket !== lifecycle || revision !== configRevision) return null;
+      if (!Array.isArray(batch)) throw new Error('私聊读取结果格式不完整。');
+      snapshots.push(...batch);
+    }
+    return snapshots;
+  }
+
+  function messageEvents(snapshots, ids, scopedGrant = null) {
+    const events = [];
+    for (const snapshot of snapshots) {
+      const chatId = snapshot.metadata?.chat_username;
+      if (!ids.includes(chatId) || snapshot.metadata?.chat_type !== 'private' || !Array.isArray(snapshot.messages)) throw new Error('读取结果与接待白名单不一致。');
+      for (const message of snapshot.messages) {
+        const time = message.timestamp * 1000;
+        if (!Number.isFinite(time) || time < startedAt || time > now() + 5000) continue;
+        // 只认明确方向，不用昵称猜测；未知作者不会触发回复。
+        const localType = String(message.local_type);
+        const sender = ['10000', '10002'].includes(localType) ? 'system' : message.sender === '我' ? 'merchant' : message.sender_username === chatId ? 'customer' : 'system';
+        if (scopedGrant && (sender === 'system' || sender === 'customer' && (String(message.local_type) !== '1' || typeof message.content !== 'string' || !scopedGrant.target.acceptUnprefixedTestMessages && !message.content.startsWith(scopedGrant.target.testPrefix)))) continue;
+        const serverId = String(message.server_id || '');
+        const localId = String(message.local_id || '');
+        const identity = /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? `server:${serverId}` : localId && message.source_database ? `local:${message.source_database}:${localId}` : '';
+        if (!identity || typeof message.content !== 'string' || !message.content.trim() || message.content.length > 8000) continue;
+        const scope = workspace && workspace.id !== 'legacy' ? `${workspace.id}|` : '';
+        const id = createHash('sha256').update(`${scope}${chatId}|${identity}`).digest('hex');
+        const kind = localType === '10000' && message.sender === '系统' && isFriendAddedSystemText(message.content) ? 'friend-added' : localType === '1' ? 'text' : 'unsupported';
+        events.push({ id: `wx:${id}`, nativeMessageId: /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? serverId : undefined, chatId, sender, text: message.content, date: new Date(time).toISOString(), source: 'realtime', kind });
+      }
+    }
+    return events.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  }
+
+  async function discover() {
+    assertCurrent();
+    const empty = { contacts: [], events: [] };
+    if (paused || !config?.settings.enabled || config.settings.autoEnrollNewContacts === false || activeScopedGrant || typeof reader.probePrivateChats !== 'function') return empty;
+    const ticket = lifecycle, revision = configRevision;
+    const chats = probeCache?.ticket === ticket && probeCache.revision === revision ? probeCache.chats : await reader.probePrivateChats(startedAt);
+    probeCache = null;
+    assertCurrent();
+    if (paused || ticket !== lifecycle || revision !== configRevision) return empty;
+    if (!Array.isArray(chats) || chats.length > 2000) throw new Error('新私聊目录无法核验，已停止自动接纳。');
+    const known = new Set(config.customers.map(customer => customer.wechatId));
+    const candidates = new Map();
+    for (const chat of chats) if (chat?.type === 'private' && (chat.inbound === true && chat.lastIncomingAt >= startedAt || chat.systemChanged === true && chat.lastSystemAt >= startedAt) && isEnrollmentChatId(chat.id) && !known.has(chat.id) && watermarks.get(chat.id) !== chat.watermark && !candidates.has(chat.id)) candidates.set(chat.id, { wechatId: chat.id, name: typeof chat.name === 'string' && chat.name.trim() ? chat.name.slice(0, 120) : chat.id });
+    const capacity = Math.max(0, 500 - config.customers.length);
+    if (!capacity || !candidates.size) return empty;
+    const unknown = [...candidates.keys()];
+    const offset = discoveryCursor % unknown.length;
+    // 目录可能多于档案容量，分轮检查，避免前面的旧会话长期挡住后来的新私聊。
+    const ids = [...unknown.slice(offset), ...unknown.slice(0, offset)].slice(0, 500);
+    discoveryCursor = (offset + ids.length) % unknown.length;
+    const snapshots = await readBatches(ids, ticket, revision);
+    if (!snapshots) return empty;
+    for (const chat of chats) if (ids.includes(chat.id)) watermarks.set(chat.id, chat.watermark);
+    const events = messageEvents(snapshots, ids);
+    const contacts = [];
+    const triggers = new Map();
+    const firstActivity = new Map();
+    for (const event of events) if (event.kind === 'friend-added' || event.sender === 'customer' && event.kind === 'text') {
+      if (!firstActivity.has(event.chatId)) firstActivity.set(event.chatId, event.date);
+    }
+    for (const event of events) if (event.kind === 'friend-added') triggers.set(event.chatId, triggers.get(event.chatId) || event);
+    for (const event of events) if (event.sender === 'customer' && event.kind === 'text' && !triggers.has(event.chatId)) triggers.set(event.chatId, event);
+    for (const [chatId, event] of [...triggers].slice(0, capacity)) {
+      contacts.push({ ...candidates.get(chatId), date: firstActivity.get(chatId) || event.date });
+    }
+    const accepted = new Set(contacts.map(contact => contact.wechatId));
+    // 好友提示只产生欢迎事件；系统正文不进入客户咨询或模型上下文。
+    return { contacts, welcomes: [...triggers.values()].filter(event => accepted.has(event.chatId) && !events.some(item => item.chatId === event.chatId && item.sender === 'merchant' && item.date >= event.date)).map(event => ({ chatId: event.chatId, eventId: `${event.kind === 'friend-added' ? 'friend-added' : 'new-private'}:${event.id}`, date: event.date })), events: events.filter(event => accepted.has(event.chatId) && event.date >= firstActivity.get(event.chatId) && event.sender !== 'system' && event.kind === 'text') };
   }
 
   async function poll() {
@@ -219,12 +322,21 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     const scopedGrant = activeScopedGrant;
     if (scopedGrant) assertScopedSelection(scopedGrant.target, config);
     const selected = new Set(config.settings.selectedCustomerIds);
-    const ids = config.customers.filter(c => selected.has(c.id) && c.autoReplyEnabled && !c.humanTakeover).map(c => c.wechatId);
+    let ids = config.customers.filter(c => selected.has(c.id) && c.autoReplyEnabled && !c.humanTakeover).map(c => c.wechatId);
+    if (ids.length > 500 || new Set(ids).size !== ids.length) throw new Error('接待客户映射不明确或超过500位，已暂停。');
+    if (!scopedGrant && typeof reader.probePrivateChats === 'function') {
+      const ticket = lifecycle, revision = configRevision;
+      const chats = await reader.probePrivateChats(startedAt);
+      assertCurrent();
+      if (paused || ticket !== lifecycle || revision !== configRevision) return [];
+      probeCache = { ticket, revision, chats };
+      const changed = new Set(chats.filter(chat => watermarks.get(chat.id) !== chat.watermark).map(chat => chat.id));
+      ids = ids.filter(id => changed.has(id));
+    }
     if (!ids.length) return [];
-    if (ids.length > 20 || new Set(ids).size !== ids.length) throw new Error('接待客户映射不明确或超过 20 位，已暂停。');
-    const snapshots = await reader.readForReplies(ids);
+    const snapshots = await readBatches(ids, lifecycle, configRevision);
     assertCurrent();
-    if (paused) return [];
+    if (paused || !snapshots) return [];
     if (scopedGrant) {
       if (activeScopedGrant?.key !== scopedGrant.key) throw new Error('临时测试读取期间授权已变化。');
       assertScopedSelection(scopedGrant.target, config);
@@ -238,28 +350,9 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
         assertScopedSelection(target, config);
       }
     }
-    const events = [];
-    for (const snapshot of snapshots) {
-      const chatId = snapshot.metadata?.chat_username;
-      if (!ids.includes(chatId) || snapshot.metadata?.chat_type !== 'private') throw new Error('读取结果与接待白名单不一致。');
-      for (const message of snapshot.messages) {
-        const time = message.timestamp * 1000;
-        if (!Number.isFinite(time) || time < startedAt || time > now() + 5000) continue;
-        // 只认明确方向，不用昵称猜测；未知作者不会触发回复。
-        const sender = message.sender === '我' ? 'merchant' : message.sender_username === chatId ? 'customer' : 'system';
-        // 默认只收本轮加前缀的新问题；明确双重授权后可收唯一测试号的新纯文本。
-        if (scopedGrant && (sender === 'system' || sender === 'customer' && (String(message.local_type) !== '1' || typeof message.content !== 'string' || !scopedGrant.target.acceptUnprefixedTestMessages && !message.content.startsWith(scopedGrant.target.testPrefix)))) continue;
-        const serverId = String(message.server_id || '');
-        const localId = String(message.local_id || '');
-        const identity = /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? `server:${serverId}` : localId && message.source_database ? `local:${message.source_database}:${localId}` : '';
-        if (!identity || typeof message.content !== 'string' || message.content.length > 8000) continue;
-        const scope = workspace && workspace.id !== 'legacy' ? `${workspace.id}|` : '';
-        const id = createHash('sha256').update(`${scope}${chatId}|${identity}`).digest('hex');
-        events.push({ id: `wx:${id}`, nativeMessageId: /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? serverId : undefined, chatId, sender, text: message.content, date: new Date(time).toISOString(), source: 'realtime', kind: String(message.local_type) === '1' ? 'text' : 'unsupported' });
-      }
-    }
     lastError = '';
-    return events.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    if (probeCache) for (const chat of probeCache.chats) if (ids.includes(chat.id)) watermarks.set(chat.id, chat.watermark);
+    return messageEvents(snapshots, ids, scopedGrant);
   }
 
   async function sendOne({ chatId, text, idempotencyKey }) {
@@ -316,7 +409,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     return pending;
   }
 
-  function pause() { paused = true; lifecycle += 1; return pauseNative(); }
+  function pause() { paused = true; lifecycle += 1; probeCache = null; return pauseNative(); }
   function fail(error) { lastError = error?.message || '本地读取异常。'; return pause(); }
-  return { status, start, syncConfig, poll, send, pause, fail };
+  return { status, start, syncConfig, enrollCustomers, discover, poll, send, pause, fail };
 }

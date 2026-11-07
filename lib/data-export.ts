@@ -43,15 +43,19 @@ function customerData(customer: Customer): Customer {
 }
 
 function productData(product: Product): Product {
-  return { id: product.id, name: product.name, type: product.type, price: product.price, description: product.description, faq: faqData(product.faq), enabled: product.enabled };
+  return { id: product.id, name: product.name, type: product.type, price: product.price, description: product.description, faq: faqData(product.faq), enabled: product.enabled, ...(product.needsRestock === undefined ? {} : { needsRestock: product.needsRestock }), ...(product.source === undefined ? {} : { source: product.source }) };
 }
 
 function replySettingsData(settings: ReplySettings): ReplySettings {
   return {
     enabled: settings.enabled, mode: settings.mode, selectedCustomerIds: [...settings.selectedCustomerIds],
+    autoEnrollNewContacts: settings.autoEnrollNewContacts ?? true,
+    welcomeEnabled: settings.welcomeEnabled ?? true,
+    welcomeMessage: settings.welcomeMessage ?? '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。',
+    ...(settings.storeInfo ? { storeInfo: { phone: settings.storeInfo.phone, address: settings.storeInfo.address, serviceContent: settings.storeInfo.serviceContent } } : {}),
     businessHours: { enabled: settings.businessHours.enabled, start: settings.businessHours.start, end: settings.businessHours.end, days: [...settings.businessHours.days] },
     faq: faqData(settings.faq), handoffKeywords: [...settings.handoffKeywords], maxReplyChars: settings.maxReplyChars,
-    cooldownSeconds: settings.cooldownSeconds, debounceSeconds: settings.debounceSeconds ?? 60, prompt: settings.prompt,
+    cooldownSeconds: settings.cooldownSeconds, debounceSeconds: settings.debounceSeconds ?? 10, prompt: settings.prompt,
   };
 }
 
@@ -67,6 +71,7 @@ export function buildFullDataJson(state: AppState): string {
       ai: { baseUrl: exportModelUrl(state.settings.ai.baseUrl), model: state.settings.ai.model, temperature: state.settings.ai.temperature, profilePrompt: state.settings.ai.profilePrompt, marketingPrompt: state.settings.ai.marketingPrompt, extractionPrompt: state.settings.ai.extractionPrompt },
     },
     imports: state.imports.map(record => ({ id: record.id, fileName: record.fileName, date: record.date, customerCount: record.customerCount, messageCount: record.messageCount })),
+    ...(state.exports ? { exports: state.exports.map(record => ({ id: record.id, fileName: record.fileName, date: record.date, kind: record.kind, customerCount: record.customerCount, messageCount: record.messageCount })) } : {}),
     demo: state.demo,
     ...(state.products === undefined ? {} : { products: state.products.map(productData) }),
     ...(state.replySettings === undefined ? {} : { replySettings: replySettingsData(state.replySettings) }),

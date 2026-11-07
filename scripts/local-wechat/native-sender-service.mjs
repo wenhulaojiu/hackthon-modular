@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { LocalError, guardLocalRequest, readLocalBody, sendLocalJson } from './service.mjs';
+import { assertAdditiveEnrollment } from './reply-enrollment.mjs';
 
 const VERSION = '9004a6cd98d32ebdcb50f35f15649e6c964e7720';
 const PREFIX = '/__local-wechat/native-sender';
@@ -71,6 +72,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
   let lastProbe = null;
   let probePromise = null;
   let authorizationSignature = null;
+  let authorizationConfig = null;
   const inflight = new Set();
 
   function assertCurrent({ allowClosed = false } = {}) {
@@ -106,10 +108,10 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     try {
       await checkDirectory(scopeDirectory);
       const info = await lstat(filename);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > 32_000) throw new Error('invalid file');
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 128_000) throw new Error('invalid file');
       const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readFile(filename)));
       const allowed = ['version', 'enabled', 'running', 'workspaceToken', 'selfWxid', 'pid', 'processCreated', 'allowedChatIds', 'settingsGeneration', 'helperRoot', 'pythonPath'];
-      if (!value || Array.isArray(value) || Object.keys(value).some(field => !allowed.includes(field)) || value.version !== 1 || typeof value.enabled !== 'boolean' || typeof value.running !== 'boolean' || !new RegExp(`^${workspace.id}@[1-9][0-9]*$`).test(value.workspaceToken || '') || !Number.isSafeInteger(value.settingsGeneration) || value.settingsGeneration < 1 || value.settingsGeneration >= Number.MAX_SAFE_INTEGER || value.helperRoot !== helperRoot || value.pythonPath !== pythonPath || !Array.isArray(value.allowedChatIds) || value.allowedChatIds.length > 20 || new Set(value.allowedChatIds).size !== value.allowedChatIds.length || value.allowedChatIds.some(chat => !validChat(chat))) throw new Error('invalid configuration');
+      if (!value || Array.isArray(value) || Object.keys(value).some(field => !allowed.includes(field)) || value.version !== 1 || typeof value.enabled !== 'boolean' || typeof value.running !== 'boolean' || !new RegExp(`^${workspace.id}@[1-9][0-9]*$`).test(value.workspaceToken || '') || !Number.isSafeInteger(value.settingsGeneration) || value.settingsGeneration < 1 || value.settingsGeneration >= Number.MAX_SAFE_INTEGER || value.helperRoot !== helperRoot || value.pythonPath !== pythonPath || !Array.isArray(value.allowedChatIds) || value.allowedChatIds.length > 500 || new Set(value.allowedChatIds).size !== value.allowedChatIds.length || value.allowedChatIds.some(chat => !validChat(chat))) throw new Error('invalid configuration');
       if (value.enabled && (!validChat(value.selfWxid) || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.processCreated !== 'string' || !/^[0-9]{1,24}$/.test(value.processCreated))) throw new Error('invalid identity');
       return value;
     } catch (error) {
@@ -149,7 +151,8 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
   function selection(config) {
     const selected = config?.settings?.selectedCustomerIds;
     const customers = config?.customers;
-    if (!Array.isArray(selected) || selected.length > 20 || selected.some(id => typeof id !== 'string') || new Set(selected).size !== selected.length || !Array.isArray(customers)) throw failure(400, '请选择最多20位真实私聊客户。', 'NATIVE_SELECTION_INVALID');
+    if (config?.settings?.autoEnrollNewContacts !== undefined && typeof config.settings.autoEnrollNewContacts !== 'boolean') throw failure(400, '自动接待新私聊需要为明确的开关。', 'NATIVE_SELECTION_INVALID');
+    if (!Array.isArray(selected) || selected.length > 500 || selected.some(id => typeof id !== 'string') || new Set(selected).size !== selected.length || !Array.isArray(customers)) throw failure(400, '请选择最多500位真实私聊客户。', 'NATIVE_SELECTION_INVALID');
     const result = [];
     for (const id of selected) {
       const matches = customers.filter(customer => customer?.id === id);
@@ -212,6 +215,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     active = false;
     requestedRunning = false;
     authorizationSignature = null;
+    authorizationConfig = null;
     const turn = ++epoch;
     return serial(async () => {
       assertCurrent();
@@ -230,12 +234,13 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     });
   }
   function syncConfig(config) {
+    config = structuredClone(config);
     let allowedChatIds;
     try { allowedChatIds = selection(config); }
     catch (error) { return Promise.reject(error); }
     const nextSignature = signature(config, allowedChatIds);
     // 读取轮询也会同步相同配置；没有授权变化时不能中断正在回读的发送。
-    if (authorizationSignature === nextSignature) return serial(async () => { assertCurrent(); });
+    if (authorizationSignature === nextSignature) return serial(async () => { assertCurrent(); authorizationConfig = config; });
     const previousSignature = authorizationSignature;
     authorizationSignature = nextSignature;
     if (config.settings.enabled !== true) requestedRunning = false;
@@ -247,14 +252,15 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
       const current = await configFile();
       if (!current) return;
       if (current.workspaceToken !== workspace.workspaceToken) throw failure(409, '后台发送账号绑定已失效，请重新启用。', 'WORKSPACE_CHANGED');
-      const running = turn === epoch && keepRunning && current.enabled && config.settings.enabled === true && allowedChatIds.length > 0;
+      const running = turn === epoch && keepRunning && current.enabled && config.settings.enabled === true && (allowedChatIds.length > 0 || config.settings.autoEnrollNewContacts !== false);
       const changed = previousSignature !== null && previousSignature !== nextSignature || current.running !== running || JSON.stringify([...current.allowedChatIds].sort()) !== JSON.stringify(allowedChatIds);
       if (changed) await save({ ...current, allowedChatIds, running, settingsGeneration: generation(current.settingsGeneration) });
       assertCurrent();
-      if (turn === epoch) active = !!running;
+      if (turn === epoch) { active = !!running; authorizationConfig = config; }
     });
   }
   function start(config) {
+    config = structuredClone(config);
     active = false;
     requestedRunning = false;
     let allowedChatIds;
@@ -264,7 +270,7 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     const turn = ++epoch;
     return serial(async () => {
       assertCurrent();
-      if (!config.settings.enabled || !allowedChatIds.length) throw failure(400, '请先启用接待规则并选择客户。', 'NATIVE_SELECTION_EMPTY');
+      if (!config.settings.enabled || !allowedChatIds.length && config.settings.autoEnrollNewContacts === false) throw failure(400, '请先启用接待规则并选择客户，或开启自动接待新私聊。', 'NATIVE_SELECTION_EMPTY');
       const current = await configFile();
       if (!current?.enabled || current.workspaceToken !== workspace.workspaceToken || platform !== 'win32') throw failure(409, '请先启用并核验后台发送组件。', 'NATIVE_NOT_ENABLED');
       const checked = await inspect(current, { fresh: true });
@@ -274,6 +280,29 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
       if (turn !== epoch) throw failure(409, '后台发送启动已被暂停。', 'NATIVE_CONFIGURATION_CHANGED');
       active = true;
       requestedRunning = true;
+      authorizationConfig = config;
+    });
+  }
+  function enrollCustomers(config) {
+    const candidate = structuredClone(config);
+    const turn = epoch;
+    return serial(async () => {
+      assertCurrent();
+      if (!active || !requestedRunning || turn !== epoch) throw failure(409, '本机接待已暂停，不能自动追加客户。', 'NATIVE_ENROLLMENT_PAUSED');
+      // 等已经进入原生调用的任务安全回读结束，再修改授权版本。
+      await sending.get(key)?.catch(() => {});
+      assertCurrent();
+      if (!active || !requestedRunning || turn !== epoch) throw failure(409, '客户接纳期间接待已暂停。', 'NATIVE_ENROLLMENT_PAUSED');
+      try { assertAdditiveEnrollment(authorizationConfig, candidate); }
+      catch { throw failure(409, '新客户只能追加到未变化的接待规则中。', 'NATIVE_ENROLLMENT_INVALID'); }
+      const allowedChatIds = selection(candidate);
+      const current = await configFile();
+      if (!current?.enabled || !current.running || current.workspaceToken !== workspace.workspaceToken || turn !== epoch) throw failure(409, '后台发送的账号或运行状态已变化。', 'NATIVE_ENROLLMENT_PAUSED');
+      if (JSON.stringify(current.allowedChatIds) !== JSON.stringify(allowedChatIds)) await save({ ...current, allowedChatIds, settingsGeneration: generation(current.settingsGeneration) });
+      assertCurrent();
+      if (!active || turn !== epoch) throw failure(409, '客户接纳期间接待已暂停。', 'NATIVE_ENROLLMENT_PAUSED');
+      authorizationSignature = signature(candidate, allowedChatIds);
+      authorizationConfig = candidate;
     });
   }
   function stop({ disable = false } = {}) {
@@ -294,36 +323,42 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     return status();
   }
   async function send({ chatId, text, idempotencyKey } = {}) {
-    let current;
+    let reservation;
     try {
       assertCurrent();
       if (!active) return rejected('本地接待已暂停。');
       if (!validChat(chatId) || typeof text !== 'string' || !text.isWellFormed() || !Buffer.byteLength(text, 'utf8') || Buffer.byteLength(text, 'utf8') > 1023 || text.includes('\0') || typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 200 || /[\u0000-\u001f\u007f]/.test(idempotencyKey)) return rejected('后台发送请求格式不正确。', 'NATIVE_PAYLOAD_INVALID');
-      await control;
-      assertCurrent();
-      current = await configFile();
-      if (!active || !current?.enabled || !current.running || current.workspaceToken !== workspace.workspaceToken || !current.allowedChatIds.includes(chatId) || chatId === current.selfWxid) return rejected('该客户未启用接待或当前接待已暂停。');
       if (sending.has(key)) return rejected('另一条后台发送尚未结束，请先核对其结果。', 'NATIVE_SEND_BUSY');
+      // 配置读取与登记发送保留在同一控制序列中，追加客户不会穿过预派发窗口。
+      reservation = await serial(async () => {
+        assertCurrent();
+        const current = await configFile();
+        assertCurrent();
+        if (!active || !current?.enabled || !current.running || current.workspaceToken !== workspace.workspaceToken || !current.allowedChatIds.includes(chatId) || chatId === current.selfWxid) return rejected('该客户未启用接待或当前接待已暂停。');
+        if (sending.has(key)) return rejected('另一条后台发送尚未结束，请先核对其结果。', 'NATIVE_SEND_BUSY');
+        const digest = createHash('sha256').update(text, 'utf8').digest('hex');
+        const generationAtStart = current.settingsGeneration;
+        const task = Promise.resolve().then(async () => {
+          // 已开始的只读预检先安全结束，之后的状态请求会被发送锁挡住。
+          if (probePromise) await probePromise.promise.catch(() => {});
+          assertCurrent();
+          if (!active) return rejected('本地接待已暂停。');
+          const result = await execute('send', args(), { workspaceToken: workspace.workspaceToken, chatId, text, idempotencyKey, generation: generationAtStart });
+          assertCurrent();
+          if (result?.status === 'failed') return rejected('后台发送组件拒绝了本次发送。', safeCode(result.code, 'NATIVE_SEND_REJECTED'));
+          if (result?.status === 'sent' && result.chatId === chatId && result.workspaceToken === workspace.workspaceToken && result.readback === true && result.textSha256 === digest && typeof result.messageId === 'string' && /^[0-9]{1,40}$/.test(result.messageId) && /[1-9]/.test(result.messageId)) return { status: 'sent', messageId: result.messageId, chatId, textSha256: digest, readback: true, workspaceToken: workspace.workspaceToken };
+          return unknown(safeCode(result?.code, 'NATIVE_RECEIPT_UNVERIFIED'));
+        }).catch(error => unknown(safeCode(error.code, 'NATIVE_DISPATCH_UNKNOWN')));
+        sending.set(key, task);
+        inflight.add(task);
+        void task.finally(() => { if (sending.get(key) === task) sending.delete(key); inflight.delete(task); });
+        return { task };
+      });
     } catch (error) { return rejected(error.status ? error.message : '后台发送尚未就绪。', safeCode(error.code, 'NATIVE_SEND_BLOCKED')); }
-    const digest = createHash('sha256').update(text, 'utf8').digest('hex');
-    const generationAtStart = current.settingsGeneration;
-    const task = Promise.resolve().then(async () => {
-      // 已开始的只读预检先安全结束，之后的状态请求会被发送锁挡住。
-      if (probePromise) await probePromise.promise.catch(() => {});
-      assertCurrent();
-      if (!active) return rejected('本地接待已暂停。');
-      const result = await execute('send', args(), { workspaceToken: workspace.workspaceToken, chatId, text, idempotencyKey, generation: generationAtStart });
-      assertCurrent();
-      if (result?.status === 'failed') return rejected('后台发送组件拒绝了本次发送。', safeCode(result.code, 'NATIVE_SEND_REJECTED'));
-      if (result?.status === 'sent' && result.chatId === chatId && result.workspaceToken === workspace.workspaceToken && result.readback === true && result.textSha256 === digest && typeof result.messageId === 'string' && /^[0-9]{1,40}$/.test(result.messageId) && /[1-9]/.test(result.messageId)) return { status: 'sent', messageId: result.messageId, chatId, textSha256: digest, readback: true, workspaceToken: workspace.workspaceToken };
-      return unknown(safeCode(result?.code, 'NATIVE_RECEIPT_UNVERIFIED'));
-    }).catch(error => unknown(safeCode(error.code, 'NATIVE_DISPATCH_UNKNOWN')));
-    sending.set(key, task);
-    inflight.add(task);
-    void task.finally(() => { if (sending.get(key) === task) sending.delete(key); inflight.delete(task); });
+    if (!reservation.task) return reservation;
     let timer;
     const timed = new Promise(resolve => { timer = setTimeout(() => resolve(unknown('NATIVE_WAIT_TIMEOUT')), sendTimeoutMs); timer.unref?.(); });
-    try { return await Promise.race([task, timed]); }
+    try { return await Promise.race([reservation.task, timed]); }
     finally { clearTimeout(timer); }
   }
   async function setupComponent() {
@@ -367,5 +402,5 @@ export function createNativeSenderService({ root, workspace, currentWorkspace, p
     try { await stop(); }
     finally { await Promise.allSettled([...inflight]); }
   }
-  return { status, start, syncConfig, pause, send, handle, close };
+  return { status, start, syncConfig, enrollCustomers, pause, send, handle, close };
 }

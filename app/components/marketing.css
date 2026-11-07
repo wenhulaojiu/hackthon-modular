@@ -1,0 +1,9 @@
+.marketing-send-note { display: flex; align-items: flex-start; gap: 8px; margin: 0 22px 14px; padding: 11px 13px; border-radius: 10px; background: var(--kexu-panel); color: var(--kexu-muted); font-size: 13px; }
+.marketing-send-note svg { margin-top: 2px; }
+.task-card .task-card-actions { flex-wrap: wrap; gap: 8px; }
+.task-followup-status { display: flex; align-items: flex-start; gap: 6px; margin-top: 12px; font-size: 12px; line-height: 1.6; color: var(--kexu-muted); }
+.task-followup-status svg { margin-top: 3px; }
+.task-followup-status.sent { color: #54783c; }
+.task-followup-status.attention { color: #9a5d30; }
+.task-followup-button { min-height: 38px; }
+@media (max-width: 600px) { .marketing-send-note { margin-right: 16px; margin-left: 16px; } .task-followup-button { flex: 1; } }

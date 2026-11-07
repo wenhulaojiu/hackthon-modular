@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, CalendarDays, CheckCircle2, Database, FileJson, FileSpreadsheet, Loader2, ShieldCheck, Users, Wallet, X } from 'lucide-react';
-import type { AppState } from '../../lib/types';
+import type { AppState, ExportRecord } from '../../lib/types';
 import { today } from '../../lib/domain';
 import { buildCustomersCsv, buildFullDataJson, buildOrdersCsv, buildTasksCsv } from '../../lib/data-export';
 
 type ExportKind = 'json' | 'customers' | 'orders' | 'tasks';
-type DataExportProps = { state: AppState; open: boolean; onClose: () => void; notify: (text: string, error?: boolean) => void; prepareState?: () => Promise<AppState> };
+type DataExportProps = { state: AppState; open: boolean; onClose: () => void; notify: (text: string, error?: boolean) => void; prepareState?: () => Promise<AppState>; onExported?: (record: ExportRecord) => Promise<boolean> };
 const EXPORTS = {
   json: { label: '完整数据', extension: 'json', build: buildFullDataJson },
   customers: { label: '客户档案', extension: 'csv', build: buildCustomersCsv },
@@ -15,7 +15,7 @@ const EXPORTS = {
   tasks: { label: '跟进任务', extension: 'csv', build: buildTasksCsv },
 };
 
-export default function DataExport({ state, open, onClose, notify, prepareState }: DataExportProps) {
+export default function DataExport({ state, open, onClose, notify, prepareState, onExported }: DataExportProps) {
   const [busy, setBusy] = useState<ExportKind | null>(null);
   const [lastExport, setLastExport] = useState('');
   const alive = useRef(true);
@@ -40,6 +40,7 @@ export default function DataExport({ state, open, onClose, notify, prepareState 
       document.body.appendChild(anchor); anchor.click(); anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1500);
       setLastExport(fileName); notify(`已发起下载：${fileName}`);
+      if (onExported && !await onExported({ id: crypto.randomUUID(), fileName, date: new Date().toISOString(), kind, customerCount: snapshot.customers.length, messageCount: snapshot.customers.reduce((sum, customer) => sum + customer.messages.length, 0) })) notify('下载已发起，但导出记录未保存，请检查保存状态。', true);
     } catch (error) { notify(error instanceof Error ? error.message : '数据导出失败，请重试', true); }
     finally { if (alive.current) setBusy(null); }
   };

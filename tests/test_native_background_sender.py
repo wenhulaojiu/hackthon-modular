@@ -165,6 +165,15 @@ class NativeSenderTests(unittest.TestCase):
         self.assertNotIn("text", result)
         self.assertEqual(self.journal_row(), ("sent", "99112233", None))
 
+    def test_allowlist_supports_500_contacts_but_rejects_501(self):
+        self.config["allowedChatIds"] = [TARGET] + [f"wxid_synthetic_{index}" for index in range(499)]
+        self.write_config()
+        sender.checked_config(self.root, self.token, self.config_path, sending=True, payload=self.payload)
+        self.config["allowedChatIds"].append("wxid_synthetic_over_limit")
+        self.write_config()
+        self.assert_code("TARGET_NOT_ALLOWED", lambda: sender.checked_config(self.root, self.token, self.config_path, sending=True, payload=self.payload))
+        self.assertFalse(self.runtime.invocations)
+
     def test_confirmed_request_is_persistent_across_module_reload(self):
         expected = self.send()
         fresh = load_script("kexu_native_sender_synthetic_restart", "native-background-sender.py")

@@ -111,7 +111,7 @@ def checked_config(root, token, filename, *, sending=False, payload=None):
         if not payload or payload.get("generation") != config.get("settingsGeneration") or type(payload.get("generation")) is not int:
             fail("SETTINGS_CHANGED")
         allowed = config.get("allowedChatIds")
-        if not isinstance(allowed, list) or not 1 <= len(allowed) <= 20 or len(set(allowed)) != len(allowed) or payload["chatId"] not in allowed:
+        if not isinstance(allowed, list) or not 1 <= len(allowed) <= 500 or len(set(allowed)) != len(allowed) or payload["chatId"] not in allowed:
             fail("TARGET_NOT_ALLOWED")
     return bound, config
 

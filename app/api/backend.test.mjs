@@ -67,6 +67,7 @@ function fixture(bindings = {}) {
     secretRoute: load("app/api/secret/route.ts"),
     aiRoute: load("app/api/ai/route.ts"),
     replyRoute: load("app/api/reply/route.ts"),
+    enrollRoute: load("app/api/reply/enroll/route.ts"),
     asUser: (user, work) => identity.run(user, work),
     close: () => sqlite.close(),
   };
@@ -562,23 +563,27 @@ test("引用辅助不放宽门禁，服务ID错用、改写拼接原文、串资
   } finally { f.close(); }
 });
 
-test("旧回复设置缺省等待60秒，显式0和120可保存，无效等待时间拒绝", async () => {
+test("旧回复设置缺省等待10秒，显式0、300和3600可保存，无效等待时间拒绝", async () => {
   const f = fixture();
   try {
     await replyFixture(f);
     const loaded = await f.server.loadState("alice");
-    assert.equal(loaded.state.replySettings.debounceSeconds, 60);
+    assert.equal(loaded.state.replySettings.debounceSeconds, 10);
     const legacy = structuredClone(loaded.state);
     delete legacy.replySettings.debounceSeconds;
-    assert.equal(f.server.appStateSchema.parse(legacy).replySettings.debounceSeconds, 60);
-    for (const seconds of [0, 120]) {
+    assert.equal(f.server.appStateSchema.parse(legacy).replySettings.debounceSeconds, 10);
+    for (const seconds of [0, 60, 300, 3600]) {
       const next = structuredClone(legacy); next.replySettings.debounceSeconds = seconds;
       assert.equal(f.server.appStateSchema.parse(next).replySettings.debounceSeconds, seconds);
     }
-    for (const seconds of [-1, 121, 0.1, null, "60"]) {
+    for (const seconds of [-1, 3601, 0.1, null, "60"]) {
       const next = structuredClone(legacy); next.replySettings.debounceSeconds = seconds;
       assert.equal(f.server.appStateSchema.safeParse(next).success, false);
     }
+    const saved = structuredClone(loaded.state); saved.replySettings.debounceSeconds = 300;
+    const response = await f.asUser("alice", () => f.stateRoute.POST(post("state", { state: saved, revision: loaded.revision })));
+    assert.equal(response.status, 200);
+    assert.equal((await f.server.loadState("alice")).state.replySettings.debounceSeconds, 300);
   } finally { f.close(); }
 });
 
@@ -880,4 +885,114 @@ test("真实Workerd执行生产模型请求：云端和本机桥均兼容manual�
       }
     } finally { await mf.dispose(); }
   }
+});
+
+
+test("自动建档接口拒绝云端、未绑定账号、跨源和过期工作区", async () => {
+  const body = { contacts: [{ wechatId: "wxid_new_fixture", name: "新好友" }] };
+  const cloud = fixture();
+  try { assert.equal((await cloud.asUser("alice", () => cloud.enrollRoute.POST(post("reply/enroll", body, { ...workspaceHeaders(accountA), "x-kexu-local": "1" })))).status, 403); }
+  finally { cloud.close(); }
+  const local = fixture(localBindings);
+  try {
+    for (const headers of [workspaceHeaders(), { ...workspaceHeaders(accountA), origin: "https://elsewhere.invalid", "x-kexu-local": "1" }, { ...workspaceHeaders(accountA, 2, `${accountA}@1`), "x-kexu-local": "1" }, workspaceHeaders(accountA)]) {
+      assert.ok([403, 409].includes((await local.asUser("alice", () => local.enrollRoute.POST(post("reply/enroll", body, headers)))).status));
+    }
+    assert.equal((await local.enrollRoute.POST(post("reply/enroll", body))).status, 401);
+  } finally { local.close(); }
+});
+
+test("新私聊在正确账号幂等建档，已取消选择和人工接管客户不重新启用", async () => {
+  const f = fixture(localBindings), scope = { id: accountA, revision: 1 };
+  try {
+    await replyFixture(f);
+    const legacy = await f.server.loadState("alice"), current = await f.server.loadState("alice", scope);
+    current.state.replySettings = { ...legacy.state.replySettings, autoEnrollNewContacts: true, selectedCustomerIds: [] };
+    await f.server.saveState("alice", current.state, current.revision, scope);
+    const headers = { ...workspaceHeaders(accountA), "x-kexu-local": "1" }, body = { contacts: [{ wechatId: "wxid_new_fixture", name: "新好友", date: "2026-11-07T01:00:00Z" }] };
+    const response = await f.asUser("alice", () => f.enrollRoute.POST(post("reply/enroll", body, headers)));
+    assert.equal(response.status, 200);const first = await response.json();assert.equal(first.addedCustomerIds.length, 1);
+    assert.equal(first.config.settings.autoEnrollNewContacts, true);
+    let saved = await f.server.loadState("alice", scope);
+    assert.equal(saved.state.customers[0].stage, "新客户");assert.equal(saved.state.customers[0].messages.length, 0);
+    const repeated = await f.asUser("alice", async () => (await f.enrollRoute.POST(post("reply/enroll", body, headers))).json());
+    assert.deepEqual(repeated.addedCustomerIds, []);assert.equal(repeated.revision, first.revision);
+    saved.state.customers[0].autoReplyEnabled = false;saved.state.customers[0].humanTakeover = true;saved.state.replySettings.selectedCustomerIds = [];
+    await f.server.saveState("alice", saved.state, saved.revision, scope);
+    const again = await f.asUser("alice", async () => (await f.enrollRoute.POST(post("reply/enroll", body, headers))).json());
+    assert.equal(again.config.customers[0].humanTakeover, true);assert.deepEqual(again.config.settings.selectedCustomerIds, []);
+    assert.deepEqual(await f.server.loadState("alice"), legacy);
+    assert.equal((await f.server.loadState("alice", { id: accountB, revision: 2 })).state.customers.length, 0);
+  } finally { f.close(); }
+});
+
+test("未启用新私聊、非法账号和超量建档请求不会扩展客户范围", async () => {
+  const f = fixture(localBindings), scope = { id: accountA, revision: 1 }, headers = { ...workspaceHeaders(accountA), "x-kexu-local": "1" };
+  try {
+    const body = { contacts: [{ wechatId: "wxid_new_fixture", name: "新好友" }] };
+    assert.equal((await f.asUser("alice", () => f.enrollRoute.POST(post("reply/enroll", body, headers)))).status, 409);
+    await replyFixture(f);const legacy = await f.server.loadState("alice"), current = await f.server.loadState("alice", scope);
+    current.state.replySettings = { ...legacy.state.replySettings, autoEnrollNewContacts: false, selectedCustomerIds: [] };
+    await f.server.saveState("alice", current.state, current.revision, scope);
+    assert.equal((await f.asUser("alice", () => f.enrollRoute.POST(post("reply/enroll", body, headers)))).status, 409);
+    for (const wechatId of ["gh_fixture", "fixture@chatroom", "filehelper", "weixin"]) assert.equal((await f.asUser("alice", () => f.enrollRoute.POST(post("reply/enroll", { contacts: [{ wechatId, name: "排除" }] }, headers)))).status, 400);
+    const tooMany = { contacts: Array.from({ length: 21 }, (_, i) => ({ wechatId: `wxid_fixture_${i}`, name: "客户" })) };
+    assert.equal((await f.asUser("alice", () => f.enrollRoute.POST(post("reply/enroll", tooMany, headers)))).status, 400);
+    assert.equal((await f.server.loadState("alice", scope)).state.customers.length, 0);
+  } finally { f.close(); }
+});
+
+
+test("直接填写的店铺电话地址服务内容可作为真实回复依据且新字段可持久化", async (t) => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f), current = await f.server.loadState("alice");
+    current.state.replySettings.storeInfo = { phone: "010-55550000", address: "测试路88号", serviceContent: "提供预约体验，基础体验129元。" };
+    current.state.products[0].needsRestock = true;
+    current.state.exports = [{ id: "export-fixture", fileName: "合成导出.json", date: "2026-11-07T01:00:00Z", kind: "json", customerCount: current.state.customers.length, messageCount: 0 }];
+    await f.server.saveState("alice", f.server.appStateSchema.parse(current.state), current.revision);
+    let knowledge;
+    t.mock.method(globalThis, "fetch", async (_url, options) => {
+      knowledge = JSON.parse(JSON.parse(options.body).messages[1].content).knowledge;
+      return modelResponse({ action: "reply", reply: "本店位于测试路88号，可拨打010-55550000预约。", reason: "店铺基础信息。", productIds: [], grounding: [{ sourceId: "store:address", quote: "店铺地址：测试路88号" }, { sourceId: "store:phone", quote: "店铺电话：010-55550000" }] });
+    });
+    const result = await f.server.runReplyAI("alice", input);
+    assert.equal(result.action, "reply");
+    assert.ok(knowledge.some(source => source.sourceId === "store:services" && source.text.includes("129元")));
+    assert.ok(knowledge.some(source => source.sourceId === "product:p-coffee" && source.text.includes("待补货")));
+    const saved = await f.server.loadState("alice");
+    assert.deepEqual(saved.state.replySettings.storeInfo, current.state.replySettings.storeInfo);
+    assert.equal(saved.state.products[0].needsRestock, true);
+    assert.equal(saved.state.exports[0].fileName, "合成导出.json");
+  } finally { f.close(); }
+});
+
+
+test("句号结合已回答上下文忽略，首次含糊消息澄清，不调用模型或随机报商品价", async (t) => {
+  const f=fixture();
+  try {
+    const input=await replyFixture(f);let calls=0;
+    t.mock.method(globalThis,"fetch",async()=>{calls++;return modelResponse({action:"reply",reply:"面包10元。",reason:"错误示例",productIds:[]});});
+    const message={...input.message,text:"。"};
+    const ignored=await f.server.runReplyAI("alice",{...input,message,context:[{sender:"merchant",text:"浅烘咖啡礼盒268元。",date:"2026-11-07T09:00:00Z"}]});
+    assert.equal(ignored.action,"ignore");assert.equal(ignored.reply,"");
+    const unclear=await f.server.runReplyAI("alice",{...input,message,context:[]});
+    assert.equal(unclear.action,"clarify");assert.doesNotMatch(unclear.reply,/10元|268元/);
+    const reference=await f.server.runReplyAI("alice",{...input,message:{...message,text:"这个多少钱？"},context:[]});
+    assert.equal(reference.action,"clarify");assert.equal(calls,0);
+  }finally{f.close();}
+});
+
+test("省略问题可承接唯一商品上下文，模型ignore与clarify不携带虚构报价", async(t)=>{
+  const f=fixture();
+  try{
+    const input=await replyFixture(f);let result={action:"reply",reply:"浅烘咖啡礼盒268元。",reason:"上文唯一商品",productIds:["p-coffee"],grounding:[{sourceId:"product:p-coffee",quote:"浅烘咖啡礼盒"}]};
+    t.mock.method(globalThis,"fetch",async()=>modelResponse(result));
+    const answer=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"那多少钱？"},context:[{sender:"customer",text:"我想了解浅烘咖啡礼盒。",date:"2026-11-07T09:00:00Z"}]});
+    assert.equal(answer.action,"reply");assert.match(answer.reply,/268元/);
+    result={action:"ignore",reply:"错误的额外报价999元",reason:"对话已结束",productIds:[],grounding:[]};
+    const ignored=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我了解了，稍后再联系。"}});assert.equal(ignored.action,"ignore");assert.equal(ignored.reply,"");
+    result={action:"clarify",reply:"虚构商品999元",reason:"指代不明确",productIds:[],grounding:[]};
+    const clarified=await f.server.runReplyAI("alice",{...input,message:{...input.message,text:"我想看看合适的。"}});assert.equal(clarified.action,"clarify");assert.doesNotMatch(clarified.reply,/999/);
+  }finally{f.close();}
 });

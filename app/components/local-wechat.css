@@ -53,6 +53,9 @@
 .local-wechat-presearch > span { color: var(--kexu-muted); font-size: 12px; line-height: 1.8; text-align: right; }
 .local-wechat-presearch .local-wechat-search { width: min(390px, 68%); }
 .local-wechat-list-toolbar > small { color: var(--kexu-muted); font-size: 12px; }
+.local-wechat-bulk-actions { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
+.local-wechat-bulk-actions .local-wechat-text-button:first-child { color: var(--kexu-ink); font-weight: 500; }
+.local-wechat-batch-summary { padding: 11px 13px; margin-top: 18px; border: 1px solid var(--kexu-line); border-radius: 8px; background: var(--kexu-panel); color: var(--kexu-muted); font-size: 12px; line-height: 1.9; }
 .local-wechat-text-button { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--kexu-muted); white-space: nowrap; }
 .local-wechat-text-button:hover { color: var(--kexu-muted); }
 .local-wechat-chat-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 284px; overflow-y: auto; padding: 7px; gap: 2px; }
@@ -145,7 +148,8 @@
   .local-wechat-step p { font-size: 12px; max-width: 170px; }
   .local-wechat-step .btn { padding: 7px 8px; font-size: 12px; }
   .local-wechat-step-number { width: 24px; height: 24px; flex-basis: 24px; font-size: 12px; }
-  .local-wechat-list-toolbar { gap: 8px; padding: 11px; }
+  .local-wechat-list-toolbar { gap: 8px; padding: 11px; flex-wrap: wrap; }
+  .local-wechat-bulk-actions { flex-basis: 100%; padding-top: 5px; }
   .local-wechat-list-toolbar > span { font-size: 12px; }
   .local-wechat-search { width: min(250px, 66%); gap: 5px; }
   .local-wechat-search input { font-size: 12px; }

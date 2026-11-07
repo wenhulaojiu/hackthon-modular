@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, CalendarDays, Check, ChevronRight, Copy, FileText, Hand, Loader2, MessageCircle, Pencil, Plus, Search, Sparkles, Tag, Trash2, Wallet, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpDown, ArrowUpRight, Bot, CalendarDays, Check, ChevronRight, Copy, FileText, Hand, Loader2, MessageCircle, Pencil, Plus, Search, Sparkles, Tag, Trash2, Wallet, X } from 'lucide-react';
 import type { AIResult, AppState, Customer, CustomersProps, CustomerStage, Order } from '../../lib/types';
 import { customerStats, shiftDate, today } from '../../lib/domain';
 import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from './reply-ui';
+import { customerContactTimestamp, sortCustomers, type CustomerSort } from './customer-sorting';
 
 const STAGES: CustomerStage[] = ['新客户', '潜在客户', '活跃客户', '重点维护', '待唤醒'];
 const COLORS = ['#7566d9', '#6599a2', '#ce956c', '#8d93be', '#9d85b0'];
@@ -24,7 +25,7 @@ const draftFor = (customer: Customer): ProfileDraft => ({ summary: customer.summ
 
 export default function Customers({ state, onChange, notify, onAI, selectedId, onSelect }: CustomersProps) {
   const [search, setSearch] = useState('');
-  const [stage, setStage] = useState('全部客户');
+  const [sort, setSort] = useState<CustomerSort>('date-desc');
   const [showCreate, setShowCreate] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', wechatId: '', stage: '新客户' as CustomerStage, tags: '', note: '' });
   const [editing, setEditing] = useState(false);
@@ -165,7 +166,7 @@ export default function Customers({ state, onChange, notify, onAI, selectedId, o
       const actual = current.customers.find(item => item.id === customer.id);
       if (!actual) return;
       const settings = replySettingsFor(current);
-      if (patch.autoReplyEnabled === true && !settings.selectedCustomerIds.includes(actual.id) && settings.selectedCustomerIds.length >= 20) { notify('本机接待最多选择 20 位客户，请先缩小回复范围', true); return; }
+      if (patch.autoReplyEnabled === true && !settings.selectedCustomerIds.includes(actual.id) && settings.selectedCustomerIds.length >= 500) { notify('本机接待最多选择 500 位客户，请先缩小回复范围', true); return; }
       if (patch.autoReplyEnabled === true && !settings.selectedCustomerIds.includes(actual.id)) settings.selectedCustomerIds = [...settings.selectedCustomerIds, actual.id];
       if (patch.autoReplyEnabled === false) settings.selectedCustomerIds = settings.selectedCustomerIds.filter(value => value !== actual.id);
       const next = { ...current, replySettings: settings, customers: current.customers.map(item => item.id === actual.id ? { ...item, ...patch } : item) };
@@ -198,7 +199,7 @@ export default function Customers({ state, onChange, notify, onAI, selectedId, o
       notify('话术已复制，可在微信中粘贴发送');
     } catch { notify('复制失败，请手动选择并复制话术', true); }
   };
-  const filtered = state.customers.filter(item => (stage === '全部客户' || item.stage === stage) && [item.name, item.wechatId, ...item.tags, ...item.manualTags].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const filtered = sortCustomers(state.customers.filter(item => [item.name, item.wechatId, ...item.tags, ...item.manualTags].join(' ').toLowerCase().includes(search.toLowerCase())), sort);
   const selectedStats = customer ? statsFor(state, customer.id) : { total: 0, count: 0 };
   const customerOrders = state.orders.filter(order => order.customerId === selectedId).sort((a, b) => b.date.localeCompare(a.date));
   const pendingCount = customerOrders.filter(order => order.status === 'pending').length;
@@ -207,13 +208,14 @@ export default function Customers({ state, onChange, notify, onAI, selectedId, o
     <div className="page-heading"><div><h1>客户档案</h1><p className="muted">记住每一位客户，让每一次沟通都有温度。</p></div><button className="btn primary" onClick={() => setShowCreate(true)}><Plus size={17} />新建客户</button></div>
     <div className="card customers-card">
       <div className="customers-toolbar"><div className="search-field"><Search size={17} /><input aria-label="搜索客户" placeholder="搜索姓名、微信号或标签…" value={search} onChange={event => setSearch(event.target.value)} />{search && <button className="icon-button" aria-label="清空搜索" onClick={() => setSearch('')}><X size={14} /></button>}</div><span className="muted small">共 {state.customers.length} 位客户</span></div>
-      <div className="tabs customer-filters">{['全部客户', ...STAGES].map(item => <button className={`tab ${stage === item ? 'active' : ''}`} key={item} onClick={() => setStage(item)}>{item}<span>{item === '全部客户' ? state.customers.length : state.customers.filter(customer => customer.stage === item).length}</span></button>)}</div>
-      <div className="table-wrap"><table className="data-table"><thead><tr><th>客户</th><th>客户阶段</th><th>客户标签</th><th>累计净消费</th><th>购买次数</th><th>下次跟进</th><th aria-label="查看详情" /></tr></thead><tbody>{filtered.map(item => {
+      <div className="customer-sort-bar"><div className="customer-sort-options" role="group" aria-label="客户排序"><span><ArrowUpDown size={15} />排序</span>{([{ value: 'date-asc', label: '日期升序' }, { value: 'date-desc', label: '日期降序' }, { value: 'activity-desc', label: '客户活跃度' }] as const).map(option => <button type="button" className={sort === option.value ? 'active' : ''} aria-pressed={sort === option.value} key={option.value} onClick={() => setSort(option.value)}>{option.label}</button>)}</div><span className="customer-sort-help">{sort === 'activity-desc' ? '按近30天客户消息数，由多到少；相同时最近联系优先' : `按最近联系日期，由${sort === 'date-asc' ? '早到晚' : '晚到早'}；无联系日期的排最后`}</span></div>
+      <div className="table-wrap"><table className="data-table"><thead><tr><th>客户</th><th>客户阶段</th><th>客户标签</th><th>最近联系</th><th>累计净消费</th><th>购买次数</th><th>下次跟进</th><th aria-label="查看详情" /></tr></thead><tbody>{filtered.map(item => {
         const stats = statsFor(state, item.id); const overdue = item.nextFollowUpAt && item.nextFollowUpAt <= today();
-        return <tr key={item.id} className="customer-row" onClick={() => onSelect(item.id)} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') onSelect(item.id); }}><td><div className="customer-cell"><span className="avatar" style={{ background: `${item.color}18`, color: item.color }}>{item.name.slice(-2)}</span><div><strong>{item.name}</strong><span className="customer-source">{item.wechatId || SOURCE_LABELS[item.source]}</span></div></div></td><td><span className={`badge ${stageColor(item.stage)}`}>{item.stage}</span></td><td><div className="tag-list">{[...item.tags, ...item.manualTags].slice(0, 2).map((tag, index) => <span className="customer-tag" key={`${tag}-${index}`}>{tag}</span>)}{item.tags.length + item.manualTags.length > 2 && <span className="muted small">+{item.tags.length + item.manualTags.length - 2}</span>}{!item.tags.length && !item.manualTags.length && <span className="muted">—</span>}</div></td><td className="money-cell">{money(stats.total)}</td><td><span className="purchase-count">{stats.count}</span><span className="muted small"> 次</span></td><td><span className={overdue ? 'date-due' : 'muted'}>{item.nextFollowUpAt ? <><CalendarDays size={13} />{item.nextFollowUpAt.slice(5).replace('-', '/')}</> : '未设置'}</span></td><td><ChevronRight size={16} className="muted" /></td></tr>;
+        const lastContact = customerContactTimestamp(item);
+        return <tr key={item.id} className="customer-row" onClick={() => onSelect(item.id)} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') onSelect(item.id); }}><td><div className="customer-cell"><span className="avatar" style={{ background: `${item.color}18`, color: item.color }}>{item.name.slice(-2)}</span><div><strong>{item.name}</strong><span className="customer-source">{item.wechatId || SOURCE_LABELS[item.source]}</span></div></div></td><td><span className={`badge ${stageColor(item.stage)}`}>{item.stage}</span></td><td><div className="tag-list">{[...item.tags, ...item.manualTags].slice(0, 2).map((tag, index) => <span className="customer-tag" key={`${tag}-${index}`}>{tag}</span>)}{item.tags.length + item.manualTags.length > 2 && <span className="muted small">+{item.tags.length + item.manualTags.length - 2}</span>}{!item.tags.length && !item.manualTags.length && <span className="muted">—</span>}</div></td><td className="customer-contact-date"><span className="muted">{lastContact === null ? '暂无记录' : new Date(lastContact).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })}</span></td><td className="money-cell">{money(stats.total)}</td><td><span className="purchase-count">{stats.count}</span><span className="muted small"> 次</span></td><td><span className={overdue ? 'date-due' : 'muted'}>{item.nextFollowUpAt ? <><CalendarDays size={13} />{item.nextFollowUpAt.slice(5).replace('-', '/')}</> : '未设置'}</span></td><td><ChevronRight size={16} className="muted" /></td></tr>;
       })}</tbody></table></div>
-      {!filtered.length && <div className="empty-state"><Search size={29} /><h3>{state.customers.length ? '没有找到匹配的客户' : '从第一位客户开始'}</h3><p>{state.customers.length ? '试试其他关键词，或切换客户阶段。' : '新建客户，或在微信导入页面导入聊天记录。'}</p>{!state.customers.length && <button className="btn secondary" onClick={() => setShowCreate(true)}><Plus size={15} />新建客户</button>}</div>}
-      {!!filtered.length && <div className="table-footer"><span>显示 {filtered.length} 位客户</span><span>消费统计仅包含已确认记录，退款已扣除</span></div>}
+      {!filtered.length && <div className="empty-state"><Search size={29} /><h3>{state.customers.length ? '没有找到匹配的客户' : '从第一位客户开始'}</h3><p>{state.customers.length ? '试试其他姓名、微信号或标签关键词。' : '新建客户，或在微信导入页面导入聊天记录。'}</p>{!state.customers.length && <button className="btn secondary" onClick={() => setShowCreate(true)}><Plus size={15} />新建客户</button>}</div>}
+      {!!filtered.length && <div className="table-footer"><span>显示 {filtered.length} 位客户</span></div>}
     </div>
 
     {showCreate && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setShowCreate(false); }}><form className="modal" onSubmit={createCustomer} role="dialog" aria-modal="true" aria-labelledby="create-customer-title"><div className="modal-header"><div><h2 id="create-customer-title">添加一位新客户</h2><p className="muted">先记下基本信息，之后慢慢了解。</p></div><button type="button" className="icon-button" aria-label="关闭" onClick={() => setShowCreate(false)}><X size={20} /></button></div><div className="form-grid"><label className="field">客户称呼 <span className="required">*</span><input className="input" autoFocus required maxLength={30} value={newCustomer.name} onChange={event => setNewCustomer({ ...newCustomer, name: event.target.value })} placeholder="如：林女士" /></label><label className="field">微信号<input className="input" value={newCustomer.wechatId} onChange={event => setNewCustomer({ ...newCustomer, wechatId: event.target.value })} placeholder="选填，方便对应联系人" /></label><label className="field">客户阶段<select className="input" value={newCustomer.stage} onChange={event => setNewCustomer({ ...newCustomer, stage: event.target.value as CustomerStage })}>{STAGES.map(item => <option key={item}>{item}</option>)}</select></label><label className="field">手工标签<input className="input" value={newCustomer.tags} onChange={event => setNewCustomer({ ...newCustomer, tags: event.target.value })} placeholder="用逗号分隔，如：老朋友，周末到店" /></label><label className="field full-width">备注<textarea className="input" rows={3} value={newCustomer.note} onChange={event => setNewCustomer({ ...newCustomer, note: event.target.value })} placeholder="记下值得关注的小细节…" /></label></div><div className="modal-footer"><button className="btn secondary" type="button" onClick={() => setShowCreate(false)}>取消</button><button className="btn primary" type="submit"><Plus size={16} />添加客户</button></div></form></div>}

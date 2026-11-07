@@ -198,7 +198,7 @@ export function createLocalWechatService(options = {}) {
     if (scriptInfo.size > 2_000_000) throw new LocalError(503, "本地导出脚本大小异常，请重新核对安装来源。");
     const script = (await readFile(state.exporter, "utf8")).replace(/\r\n/g, "\n");
     const scriptHash = createHash("sha256").update(script, "utf8").digest("hex");
-    return { ...state, scriptVerified: scriptHash === EXPECTED_EXPORTER_SHA256, fingerprint: JSON.stringify({ ...state.config, scriptHash }) };
+    return { ...state, scriptVerified: scriptHash === (options.expectedExporterSha256 || EXPECTED_EXPORTER_SHA256), fingerprint: JSON.stringify({ ...state.config, scriptHash }) };
   }
 
   function claim(job = null) {
@@ -208,12 +208,12 @@ export function createLocalWechatService(options = {}) {
     return context;
   }
 
-  async function invoke(context, state, args) {
+  async function invoke(context, state, args, script = state.exporter) {
     assertCurrent();
     const timer = setTimeout(() => { context.reason = "timeout"; context.controller.abort(); }, timeoutMs);
     timer.unref?.();
     try {
-      const result = await runner({ command: state.config.pythonPath, args: ["-B", state.exporter, ...args, ...(state.config.dbDir ? ["--db-dir", state.config.dbDir] : [])], cwd: state.config.exporterRoot, signal: context.controller.signal, maxOutputBytes: 2_000_000 });
+      const result = await runner({ command: state.config.pythonPath, args: ["-B", script, ...args, ...(state.config.dbDir ? ["--db-dir", state.config.dbDir] : [])], cwd: state.config.exporterRoot, signal: context.controller.signal, maxOutputBytes: 2_000_000 });
       assertCurrent();
       if (context.controller.signal.aborted) throw new LocalError(context.reason === "timeout" ? 504 : 499, context.reason === "timeout" ? "本地读取超时，进程已停止，请缩小范围后重试。" : "本地读取已取消。");
       if (result.code !== 0 || result.tooLarge) throw upstreamError(result);
@@ -438,7 +438,36 @@ export function createLocalWechatService(options = {}) {
     }
   }
 
-  return { handle, close, inspect, readForReplies };
+  // 后台发现复用同一目录验证及串行读取锁，不导出消息正文。
+  async function listPrivateChats() { return (await list("")).chats; }
+
+  async function probePrivateChats(startedAt) {
+    const state = await ready();
+    if (!state.scriptVerified || !state.config.dbDir || !workspace || workspace.id === 'legacy' || !Number.isSafeInteger(startedAt) || startedAt < 0) throw new LocalError(503, "新私聊水位检查需要已核验的固定提取组件与明确绑定的账号。");
+    const context = claim();
+    context.done = (async () => {
+      try {
+        const result = await invoke(context, state, ["--exporter-root", state.config.exporterRoot, "--workspace-token", workspace.workspaceToken, "--started-at", String(startedAt), "--until", String(now() + 5000)], path.join(root, 'scripts', 'local-wechat', 'recent-private-probe.py'));
+        const current = await ready();
+        if (current.fingerprint !== state.fingerprint) throw new LocalError(409, "水位检查期间账号或提取配置已变化，未处理消息。");
+        strictKeys(result, ['status', 'workspaceToken', 'chats', 'message_bodies_read', 'files_written']);
+        if (result.status !== 'watermarked' || result.workspaceToken !== workspace.workspaceToken || result.message_bodies_read !== false || result.files_written !== false || !Array.isArray(result.chats) || result.chats.length > 2000) throw new LocalError(502, "新私聊水位回执无法核验。");
+        const seen = new Set();
+        for (const chat of result.chats) {
+          strictKeys(chat, ['id', 'name', 'type', 'timestamp', 'watermark', 'inbound', 'lastIncomingAt', 'systemChanged', 'lastSystemAt']);
+          if (!validId(chat.id) || seen.has(chat.id) || chat.type !== 'private' || typeof chat.name !== 'string' || !chat.name || chat.name.length > 120 || !Number.isSafeInteger(chat.timestamp) || chat.timestamp < startedAt || chat.timestamp > now() + 5000 || !/^[a-f0-9]{64}$/.test(chat.watermark) || typeof chat.inbound !== 'boolean' || (chat.inbound ? !Number.isSafeInteger(chat.lastIncomingAt) || chat.lastIncomingAt < startedAt || chat.lastIncomingAt > chat.timestamp : chat.lastIncomingAt !== null)) throw new LocalError(502, "新私聊水位范围或方向无法核验。");
+          if (typeof chat.systemChanged !== 'boolean' || (chat.systemChanged ? !Number.isSafeInteger(chat.lastSystemAt) || chat.lastSystemAt < startedAt || chat.lastSystemAt > chat.timestamp : chat.lastSystemAt !== null)) throw new LocalError(502, "新私聊系统事件水位无法核验。");
+          seen.add(chat.id);
+        }
+        if (cacheFingerprint !== state.fingerprint) { conversations.clear(); cacheFingerprint = state.fingerprint; }
+        for (const chat of result.chats) conversations.set(chat.id, now() + cacheMs);
+        return result.chats;
+      } finally { if (active === context) active = null; }
+    })();
+    return context.done;
+  }
+
+  return { handle, close, inspect, readForReplies, listPrivateChats, probePrivateChats };
 }
 
 // 自动回复接口复用同一回环、同源和请求体保护，不另开公网监听。

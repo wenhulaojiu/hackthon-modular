@@ -5,6 +5,9 @@ export function replySettingsFor(state: AppState): ReplySettings {
   const value = state.replySettings;
   return {
     enabled: false,
+    autoEnrollNewContacts: true,
+    welcomeEnabled: true,
+    welcomeMessage: '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。',
     mode: 'review',
     selectedCustomerIds: [],
     faq: [],
@@ -13,7 +16,7 @@ export function replySettingsFor(state: AppState): ReplySettings {
     cooldownSeconds: 30,
     prompt: '你是本店的客户服务助手。只根据真实商品、服务说明、FAQ和当前对话回答。没有依据的价格、库存、承诺或效果不得编造；无法确认、客户要求人工或涉及投诉时转人工处理。回复自然简短，不替客户确认购买或付款。',
     ...value,
-    debounceSeconds: value?.debounceSeconds ?? 60,
+    debounceSeconds: value?.debounceSeconds ?? 10,
     businessHours: { enabled: true, start: '09:00', end: '18:00', days: [1, 2, 3, 4, 5, 6], ...value?.businessHours },
   };
 }
@@ -42,7 +45,17 @@ export async function replyRequest<T>(path: string, body?: unknown, signal?: Abo
 }
 
 export async function syncLocalReplyConfig(state: AppState) {
-  if (localRepliesAvailable()) await replyRequest('/config', replyConfigFor(state));
+  if (localRepliesAvailable()) await replyRequest('/config', await loadSavedReplyConfig());
+}
+
+export async function loadSavedReplyConfig() {
+  const expected = captureWorkspace();
+  const response = await workspaceFetch('/api/state', { cache: 'no-store' }, expected);
+  const data = await response.json() as { state?: AppState; error?: string };
+  assertWorkspaceCurrent(expected);
+  if (!response.ok || !data.state) throw new ReplyBridgeError(data.error || '无法读取已保存的接待规则。');
+  // 后台可能刚完成新客户建档，始终同步最新持久化名单，避免旧页面把新客户覆盖掉。
+  return replyConfigFor(data.state);
 }
 
 // 首次启用由本机接口核对现场账号与版本，不能用尚未绑定的兼容状态阻断入口。

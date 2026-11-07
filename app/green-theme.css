@@ -26,7 +26,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--kexu-focus); ou
 }
 .workspace { margin-left: 246px; }
 .brand { margin-bottom: 28px; color: var(--kexu-ink); font-size: 24px; letter-spacing: .5px; }
-.brand-mark { background: var(--kexu-lime); color: var(--kexu-ink); border-radius: 13px; box-shadow: none; }
+.brand-mark { background: transparent; color: var(--kexu-ink); border-radius: 0; box-shadow: none; }
 .brand-mark::after { display: none; }
 .brand-en { color: var(--kexu-muted); }
 .store-switch { color: var(--kexu-ink); background: #fff; border-color: var(--kexu-line); border-radius: 13px; }
@@ -197,3 +197,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--kexu-focus); ou
   .recent-list { grid-template-columns: minmax(0, 1fr); padding-right: 18px; padding-left: 18px; }
   .workspace-changed-banner { align-items: stretch; flex-direction: column; }
 }
+
+/* 页面工具移至内容区，手机保留侧栏菜单入口。 */
+.app-shell > .sidebar > .brand{margin-bottom:30px}
+.app-shell > .workspace > .main-content{min-height:100vh}
+@media(max-width:720px){.main-content > .page-heading .heading-actions{margin-left:auto}.main-content > .page-heading .mobile-menu{display:inline-flex}}

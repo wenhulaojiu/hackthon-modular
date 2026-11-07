@@ -57,7 +57,7 @@ test('原生组件拒绝旧服务的残缺状态与前台发送能力', async t 
   await assert.rejects(nativeSenderRequest('enable'), /当前微信构建不兼容/);
 });
 
-test('在线页面不会连接原生组件，已有规则仍默认等待60秒', async t => {
+test('在线页面不会连接原生组件，缺省等待10秒且显式60秒保持', async t => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { protocol: 'https:', hostname: 'example.test' } } });
   t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else Reflect.deleteProperty(globalThis, 'window'); });
@@ -65,7 +65,9 @@ test('在线页面不会连接原生组件，已有规则仍默认等待60秒', 
   t.mock.method(globalThis, 'fetch', async () => { calls += 1; return jsonResponse(component); });
   await assert.rejects(nativeSenderRequest('setup'), /Windows 本地版/);
   assert.equal(calls, 0);
-  assert.equal(replySettingsFor({} as AppState).debounceSeconds, 60);
+  assert.equal(replySettingsFor({} as AppState).debounceSeconds, 10);
+  const explicit = { ...replySettingsFor({} as AppState), debounceSeconds: 60 };
+  assert.equal(replySettingsFor({ replySettings: explicit } as AppState).debounceSeconds, 60);
 });
 
 test('切换工作区时丢弃迟到的组件操作结果', async t => {

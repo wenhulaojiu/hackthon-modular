@@ -7,10 +7,21 @@
 .search-field input { min-width: 0; flex: 1; padding: 0; color: var(--kexu-ink); background: transparent; border: 0; outline: none; font: inherit; font-size: 14px; }
 .search-field input::placeholder { color: var(--kexu-muted); }
 .search-field .icon-button { width: 22px; height: 22px; }
-.customer-filters { padding: 0 24px; gap: 24px; overflow-x: auto; border-bottom: 1px solid var(--kexu-line); }
-.customer-filters .tab { gap: 7px; padding: 14px 1px; font-size: 14px; white-space: nowrap; }
-.customer-filters .tab > span { padding: 1px 5px; font-size: 12px; line-height: 17px; border-radius: 5px; background: var(--kexu-accent-soft); color: var(--kexu-muted); }
-.customer-filters .tab.active > span { color: var(--kexu-accent); background: var(--kexu-accent-soft); }
+.customer-sort-bar { padding: 0 24px 17px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--kexu-line); }
+.customer-sort-options { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.customer-sort-options > span { display: inline-flex; align-items: center; gap: 6px; margin-right: 7px; color: var(--kexu-muted); font-size: 13px; }
+.customer-sort-options button { padding: 7px 11px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--kexu-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.customer-sort-options button:hover { color: var(--kexu-ink); background: var(--kexu-panel); }
+.customer-sort-options button.active { color: var(--kexu-ink); background: var(--kexu-accent-soft); border-color: var(--kexu-line); font-weight: 600; }
+.customer-sort-options button:focus-visible { outline: 2px solid var(--kexu-focus); outline-offset: 2px; }
+.customer-sort-help { color: var(--kexu-muted); font-size: 12px; line-height: 1.6; }
+.customer-contact-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.marketing-followup-settings { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; padding: 20px 23px; margin-bottom: 23px; }
+.marketing-followup-settings h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.marketing-followup-settings p { margin-top: 6px; color: var(--kexu-muted); font-size: 12px; line-height: 1.8; }
+.marketing-followup-settings form { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; color: var(--kexu-muted); font-size: 13px; }
+.marketing-followup-settings .input { width: 78px; text-align: center; font-variant-numeric: tabular-nums; }
+.marketing-followup-settings small { flex-basis: 100%; text-align: right; font-size: 12px; }
 .customers-card .data-table { width: 100%; border-collapse: collapse; }
 .customers-card .data-table th { height: 48px; padding: 12px 14px; background: var(--kexu-panel); text-align: left; font-size: 13px; font-weight: 500; color: var(--kexu-muted); white-space: nowrap; }
 .customers-card .data-table td { height: 76px; padding: 12px 14px; border-top: 1px solid var(--kexu-line); font-size: 14px; }
@@ -186,7 +197,6 @@
 @media (max-width: 1180px) {
   .settings-grid { grid-template-columns: minmax(0, 1fr) 230px; gap: 18px; }
   .settings-tips { padding: 22px 18px; }
-  .customer-filters { gap: 19px; }
   .customers-card .data-table th, .customers-card .data-table td { padding-right: 10px; padding-left: 10px; }
 }
 @media (max-width: 950px) {
@@ -199,7 +209,12 @@
   .customers-toolbar { padding: 16px; gap: 10px; }
   .search-field { width: min(340px, 78%); }
   .customers-toolbar > span { font-size: 12px; white-space: nowrap; }
-  .customer-filters { padding: 0 16px; gap: 20px; }
+  .customer-sort-bar { padding: 0 16px 16px; align-items: flex-start; gap: 10px; }
+  .customer-sort-options { gap: 4px; }
+  .customer-sort-options > span { margin-right: 3px; }
+  .customer-sort-options button { padding: 7px 8px; }
+  .marketing-followup-settings { padding: 17px; gap: 14px; }
+  .marketing-followup-settings small { text-align: left; }
   .table-footer { padding: 14px 16px; flex-direction: column; gap: 7px; }
   .customers-page .form-grid, .settings-page .form-grid { grid-template-columns: 1fr; gap: 17px; }
   .drawer-topline { padding-right: 18px; padding-left: 20px; }

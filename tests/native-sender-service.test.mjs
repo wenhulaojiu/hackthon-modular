@@ -15,6 +15,91 @@ const workspace = { id: 'acct-aaaaaaaaaaaaaaaaaaaa', workspaceToken: 'acct-aaaaa
 const configuration = () => ({ settings: { enabled: true, selectedCustomerIds: ['customer-one'] }, customers: [{ id: 'customer-one', wechatId: 'wxid_synthetic_target', autoReplyEnabled: true }] });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const receipt = input => ({ status: 'sent', readback: true, messageId: '12345678901234567890', chatId: input.chatId, workspaceToken: input.workspaceToken, textSha256: createHash('sha256').update(input.text, 'utf8').digest('hex') });
+const extendedConfiguration = current => ({ ...structuredClone(current), settings: { ...structuredClone(current.settings), selectedCustomerIds: [...current.settings.selectedCustomerIds, 'customer-two'] }, customers: [...structuredClone(current.customers), { id: 'customer-two', wechatId: 'wxid_synthetic_second', autoReplyEnabled: true, humanTakeover: false }] });
+
+test('新增客户授权等待在途原生回读结束，保留运行状态且只增一次版本', async t => {
+  const entered = deferred(); const exit = deferred();
+  const f = await fixture(t, { run: async (action, _args, input) => {
+    if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+    if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+    if (input.idempotencyKey === 'synthetic-request-one') { entered.resolve(); await exit.promise; }
+    return receipt(input);
+  } });
+  await f.enable(); const initial = configuration(); await f.service.start(initial);
+  const before = await f.readConfig(); const send = f.service.send(f.message()); await entered.promise;
+  let enrolled = false;
+  const next = extendedConfiguration(initial);
+  const enrolling = f.service.enrollCustomers(next).then(() => { enrolled = true; });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(enrolled, false);
+  assert.deepEqual(await f.readConfig(), before, '在途worker的generation与名单不能提前变化');
+  exit.resolve(); assert.equal((await send).status, 'sent'); await enrolling;
+  const after = await f.readConfig();
+  assert.equal(after.running, true);
+  assert.equal(after.settingsGeneration, before.settingsGeneration + 1);
+  assert.deepEqual(after.allowedChatIds, ['wxid_synthetic_second', 'wxid_synthetic_target']);
+  await f.service.enrollCustomers(structuredClone(next));
+  assert.deepEqual(await f.readConfig(), after, '重复接纳不再换版本');
+  assert.equal((await f.service.send(f.message({ chatId: 'wxid_synthetic_second', idempotencyKey: 'after-enrollment' }))).status, 'sent');
+});
+
+test('原生增量授权不恢复期间发生的人工暂停，旧客户和规则不能借追加改变', async t => {
+  const entered = deferred(); const exit = deferred();
+  const f = await fixture(t, { run: async (action, _args, input) => {
+    if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+    if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+    entered.resolve(); await exit.promise; return receipt(input);
+  } });
+  await f.enable(); const initial = configuration(); await f.service.start(initial);
+  for (const change of [next => { next.settings.enabled = false; }, next => { next.customers[0].humanTakeover = true; }, next => { next.settings.selectedCustomerIds.shift(); }, next => { next.customers.at(-1).wechatId = initial.customers[0].wechatId; }]) {
+    const next = extendedConfiguration(initial); change(next);
+    await assert.rejects(f.service.enrollCustomers(next), /只能追加/);
+  }
+  const send = f.service.send(f.message()); await entered.promise;
+  const enrolling = f.service.enrollCustomers(extendedConfiguration(initial));
+  const rejectedEnrollment = assert.rejects(enrolling, /已暂停/);
+  const pause = f.service.pause();
+  exit.resolve(); await send; await rejectedEnrollment; await pause;
+  assert.equal((await f.readConfig()).running, false);
+  assert.deepEqual((await f.readConfig()).allowedChatIds, ['wxid_synthetic_target']);
+  assert.equal((await f.service.send(f.message({ idempotencyKey: 'after-pause' }))).status, 'failed');
+});
+
+test('发送预派发与客户追加同时进入时按顺序保留，worker始终看到匹配的generation', async t => {
+  let f;
+  f = await fixture(t, { run: async (action, _args, input) => {
+    if (action === 'bind') return { ready: true, compatible: true, installed: true, pid: 1234, processCreated: '123456789', selfWxid: 'wxid_synthetic_self' };
+    if (action === 'inspect') return { ready: true, compatible: true, installed: true };
+    assert.equal((await f.readConfig()).settingsGeneration, input.generation);
+    return receipt(input);
+  } });
+  await f.enable(); const initial = configuration(); await f.service.start(initial);
+  const pending = f.service.send(f.message());
+  const adding = f.service.enrollCustomers(extendedConfiguration(initial));
+  assert.equal((await pending).status, 'sent'); await adding;
+  assert.deepEqual((await f.readConfig()).allowedChatIds, ['wxid_synthetic_second', 'wxid_synthetic_target']);
+});
+
+test('空名单可等待新私聊，最多500位真实客户的范围可发送，超限拒绝', async t => {
+  const f = await fixture(t); await f.enable();
+  const empty = { settings: { enabled: true, autoEnrollNewContacts: true, selectedCustomerIds: [] }, customers: [] };
+  await f.service.start(empty);
+  assert.equal((await f.readConfig()).running, true);
+  assert.deepEqual((await f.readConfig()).allowedChatIds, []);
+  await f.service.enrollCustomers({ settings: { ...empty.settings, selectedCustomerIds: ['customer-one'] }, customers: configuration().customers });
+  assert.equal((await f.service.send(f.message())).status, 'sent');
+  await f.service.pause();
+  const many = configuration();
+  many.customers = Array.from({ length: 500 }, (_, index) => ({ id: `customer-${index}`, wechatId: `wxid_synthetic_${index}`, autoReplyEnabled: true }));
+  many.settings.selectedCustomerIds = many.customers.map(customer => customer.id);
+  await f.service.start(many);
+  assert.equal((await f.readConfig()).allowedChatIds.length, 500);
+  assert.equal((await f.service.send(f.message({ chatId: 'wxid_synthetic_499', idempotencyKey: 'large-selection' }))).status, 'sent');
+  many.customers.push({ id: 'customer-500', wechatId: 'wxid_synthetic_500', autoReplyEnabled: true });
+  many.settings.selectedCustomerIds.push('customer-500');
+  await assert.rejects(f.service.start(many), /最多500/);
+  await assert.rejects(f.service.start({ ...empty, settings: { ...empty.settings, autoEnrollNewContacts: false } }), /开启自动接待/);
+});
 
 test('真实Node管理器与回复适配层合同互通，原生就绪后发送且重复请求不重复调用', async t => {
   const f = await fixture(t);
@@ -160,7 +245,7 @@ test('原生发送严格映射白名单并传generation，暂停保留组件选�
   const takeover = configuration(); takeover.customers[0].humanTakeover = true;
   await f.service.syncConfig(takeover);
   const changed = await f.readConfig();
-  assert.equal(changed.running, false);
+  assert.equal(changed.running, true, '开启新私聊接待时仍可等待新客户，但人工接管目标已移出授权');
   assert.deepEqual(changed.allowedChatIds, []);
   assert.ok(changed.settingsGeneration > before.settingsGeneration);
   assert.equal((await f.service.send(f.message({ idempotencyKey: 'synthetic-after-takeover' }))).status, 'failed');
@@ -182,7 +267,7 @@ test('原生发送严格映射白名单并传generation，暂停保留组件选�
 test('坏白名单、群聊、无NUL约束或过长UTF8正文不会启动发送worker', async t => {
   const f = await fixture(t);
   await f.enable();
-  for (const change of [config => { config.customers.push({ ...config.customers[0] }); }, config => { config.customers[0].wechatId = 'room@chatroom'; }, config => { config.settings.selectedCustomerIds = Array.from({ length: 21 }, (_, i) => `customer-${i}`); }]) {
+  for (const change of [config => { config.customers.push({ ...config.customers[0] }); }, config => { config.customers[0].wechatId = 'room@chatroom'; }, config => { config.settings.selectedCustomerIds = Array.from({ length: 501 }, (_, i) => `customer-${i}`); }]) {
     const config = configuration(); change(config);
     await assert.rejects(f.service.start(config));
   }

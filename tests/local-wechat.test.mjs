@@ -141,6 +141,46 @@ test("会话列表仅保留私聊，并把搜索词作为单个固定参数", as
   assert.ok(result.data.warnings.some((warning) => warning.includes("未匹配已核验版本")));
 });
 
+test("后台私聊目录复用已验证列表，不导出正文或创建聊天任务", async (t) => {
+  const f = await fixture(t);
+  const chats = await f.service.listPrivateChats();
+  assert.deepEqual(chats.map(chat => chat.id), ["wxid_friend", "wxid_other"]);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].args.at(-1), "--list-chats=");
+  assert.ok(!f.calls[0].args.includes("--output-root"));
+});
+
+test("单次水位进程只返回元数据并刷新选中会话缓存，随后正文导出不重复扫描目录", async t => {
+  const workspace = { id: 'acct-aaaaaaaaaaaaaaaaaaaa', workspaceToken: 'acct-aaaaaaaaaaaaaaaaaaaa@1' };
+  const startedAt = Date.parse('2026-11-07T04:00:00Z');
+  const f = await fixture(t, async input => input.args[1].endsWith('recent-private-probe.py') ? { code: 0, stdout: JSON.stringify({ status: 'watermarked', workspaceToken: workspace.workspaceToken, message_bodies_read: false, files_written: false, chats: [{ id: 'wxid_friend', name: '合成好友', type: 'private', timestamp: startedAt, watermark: 'a'.repeat(64), inbound: true, lastIncomingAt: startedAt, systemChanged: false, lastSystemAt: null }] }) } : syntheticExport(input), { workspace, currentWorkspace: () => workspace.workspaceToken, now: () => startedAt, expectedExporterSha256: digest('# 合成测试占位文件，绝不执行。\n') });
+  const dbDir = path.join(f.root, 'synthetic-account', 'db_storage'); await mkdir(dbDir, { recursive: true });
+  await writeFile(path.join(f.root, '.local-wechat/config.json'), JSON.stringify({ exporterRoot: f.exporterRoot, pythonPath: f.pythonPath, dbDir }), 'utf8');
+  const chats = await f.service.probePrivateChats(startedAt);
+  assert.equal(chats.length, 1); assert.equal(f.calls.length, 1);
+  assert.ok(!JSON.stringify(chats).includes('content'));
+  await f.service.readForReplies(['wxid_friend']);
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.calls[1].args.includes('--output-root'));
+  assert.ok(!f.calls.some(call => call.args.some(arg => arg.startsWith('--list-chats='))));
+});
+
+test("水位回执重复、混入正文或账号变化一律拒绝，不放入会话缓存", async t => {
+  for (const scenario of ['duplicate', 'body', 'workspace']) await t.test(scenario, async child => {
+    const workspace = { id: 'acct-aaaaaaaaaaaaaaaaaaaa', workspaceToken: 'acct-aaaaaaaaaaaaaaaaaaaa@1' };
+    let token = workspace.workspaceToken;
+    const startedAt = Date.parse('2026-11-07T04:00:00Z');
+    const chat = { id: 'wxid_friend', name: '合成好友', type: 'private', timestamp: startedAt, watermark: 'b'.repeat(64), inbound: true, lastIncomingAt: startedAt, systemChanged: false, lastSystemAt: null };
+    const f = await fixture(child, async () => {
+      if (scenario === 'workspace') token = 'acct-aaaaaaaaaaaaaaaaaaaa@2';
+      return { code: 0, stdout: JSON.stringify({ status: 'watermarked', workspaceToken: workspace.workspaceToken, message_bodies_read: false, files_written: false, chats: scenario === 'duplicate' ? [chat, chat] : [{ ...chat, ...(scenario === 'body' ? { content: '不允许返回合成正文' } : {}) }] }) };
+    }, { workspace, currentWorkspace: () => token, now: () => startedAt, expectedExporterSha256: digest('# 合成测试占位文件，绝不执行。\n') });
+    const dbDir = path.join(f.root, 'synthetic-account', 'db_storage'); await mkdir(dbDir, { recursive: true });
+    await writeFile(path.join(f.root, '.local-wechat/config.json'), JSON.stringify({ exporterRoot: f.exporterRoot, pythonPath: f.pythonPath, dbDir }), 'utf8');
+    await assert.rejects(() => f.service.probePrivateChats(startedAt));
+  });
+});
+
 test("已配置venv解释器优先于基础Python环境变量，未知版本只提示不虚称已验证", async (t) => {
   const original = process.env.KEXU_PYTHON;
   process.env.KEXU_PYTHON = "C:/not-used/base-python.exe";

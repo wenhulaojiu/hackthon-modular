@@ -3,17 +3,22 @@ import { readFile } from 'node:fs/promises';
 import { createReplyEngine } from './reply-engine.mjs';
 import { createReplyAdapter } from './reply-adapter.mjs';
 import { containsCredentialLikeText } from './credential-guard.mjs';
+import { assertAdditiveEnrollment, requestReplyEnrollment } from './reply-enrollment.mjs';
 import { LocalError, guardLocalRequest, readLocalBody, sendLocalJson } from './service.mjs';
 
 const PREFIX = '/__local-wechat/replies';
 
 export async function createLocalReplyService({ root, reader, origin, fetch: request = globalThis.fetch, adapter: suppliedAdapter, pollMs = 30_000, generate: suppliedGenerate, workspace, currentWorkspace, nativeSender, nativeVerificationMode = false } = {}) {
   const address = new URL(origin);
+  const requestLocalAPI = request;
   if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1') throw new Error('接待后台只能请求同一本机服务。');
   if (workspace && workspace.id !== 'legacy' && !/^acct-[a-f0-9]{20}$/.test(workspace.id)) throw new Error('接待工作区标识不正确。');
   const adapter = suppliedAdapter || createReplyAdapter({ root, reader, fetch: request, workspace, currentWorkspace, nativeSender });
   let closed = false;
   let polling = null;
+  let runEpoch = 0;
+  let pollController = null;
+  let stateRevision;
   function assertCurrent() {
     if (closed || workspace && currentWorkspace?.() !== workspace.workspaceToken) throw new LocalError(409, '微信工作区已切换，接待已停止，请刷新页面。', 'WORKSPACE_CHANGED');
   }
@@ -44,6 +49,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, generate });
 
   async function pause() {
+    runEpoch += 1; pollController?.abort();
     // 同步封禁适配器并停止引擎，不强杀已经进入原生调用的任务。
     let stopping;
     try { stopping = Promise.resolve(adapter.pause()); } catch (error) { stopping = Promise.reject(error); }
@@ -53,7 +59,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
 
   async function status() {
     assertCurrent();
-    const result = { ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000), ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}) };
+    const result = { ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000), ...(stateRevision !== undefined ? { stateRevision } : {}), ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}) };
     assertCurrent();
     return result;
   }
@@ -61,22 +67,53 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   async function poll() {
     if (closed || polling || !(await engine.status()).running) return;
     if (closed || polling) return;
+    const ticket = runEpoch;
+    const controller = new AbortController(); pollController = controller;
+    const stillRunning = async () => !closed && ticket === runEpoch && (await engine.status()).running;
     polling = (async () => {
       try {
         assertCurrent();
-        const config = await engine.getConfig();
+        let config = await engine.getConfig();
         await adapter.syncConfig(config);
         const events = await adapter.poll();
         assertCurrent();
         // 读取期间暂停或关闭后，不再将刚读出的新消息加入接待队列。
-        if (closed || !(await engine.status()).running) return;
-        for (const event of events) await engine.ingest(event);
+        if (!await stillRunning()) return;
+        const discovered = typeof adapter.discover === 'function' ? await adapter.discover() : { contacts: [], events: [] };
+        if (!await stillRunning()) return;
+        for (let offset = 0; offset < discovered.contacts.length; offset += 20) {
+          const contacts = discovered.contacts.slice(offset, offset + 20);
+          const enrolled = await requestReplyEnrollment({ origin: address.origin, request, contacts, workspace, signal: controller.signal });
+          assertCurrent();
+          if (!await stillRunning()) return;
+          assertAdditiveEnrollment(config, enrolled.config);
+          await adapter.enrollCustomers(enrolled.config);
+          if (!await stillRunning()) return;
+          await engine.enrollCustomers(enrolled.config);
+          if (!await stillRunning()) return;
+          config = await engine.getConfig();
+          stateRevision = enrolled.revision;
+        }
+        const allowed = new Set(config.customers.filter(customer => config.settings.selectedCustomerIds.includes(customer.id) && customer.autoReplyEnabled && !customer.humanTakeover).map(customer => customer.wechatId));
+        events.push(...discovered.events.filter(event => allowed.has(event.chatId)));
+        const manualChats = new Set(events.filter(event => event.sender === 'merchant').map(event => event.chatId));
+        const welcomeEvents = [...(discovered.welcomes || []), ...events.filter(event => event.kind === 'friend-added' || event.sender === 'customer' && event.kind === 'text').map(event => ({ chatId: event.chatId, eventId: `${event.kind === 'friend-added' ? 'friend-added' : 'new-private'}:${event.id}`, date: event.date }))];
+        const welcomed = new Set();
+        for (const welcome of welcomeEvents) {
+          if (!await stillRunning()) return;
+          // engine仅允许持久化新接纳资格；已有人手动回复的同批会话不再发欢迎。
+          if (allowed.has(welcome.chatId) && !manualChats.has(welcome.chatId) && !welcomed.has(welcome.chatId)) { await engine.enqueueWelcome(welcome); welcomed.add(welcome.chatId); }
+        }
+        events.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+        for (const event of events) if (event.kind !== 'friend-added') await engine.ingest(event);
       } catch (error) {
+        if (closed || ticket !== runEpoch) return;
+        runEpoch += 1;
         const stopping = Promise.resolve(adapter.fail(error));
         stopping.catch(() => {});
         try { await engine.pause(error?.message || '本机新消息读取失败。'); } finally { await stopping; }
       }
-    })().finally(() => { polling = null; });
+    })().finally(() => { polling = null; if (pollController === controller) pollController = null; });
     return polling;
   }
   const timer = setInterval(() => { void poll().catch(() => {}); }, pollMs);
@@ -92,6 +129,11 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
       if (closed) throw new LocalError(503, '本机接待服务已停止。');
       const route = pathname.slice(PREFIX.length);
       if (request.method === 'GET' && route === '/status') sendLocalJson(response, 200, await status());
+      else if (request.method === 'GET' && /^\/jobs\/[0-9a-f-]{36}$/.test(route)) {
+        const job = await engine.getJob(route.slice('/jobs/'.length));
+        if (!job) throw new LocalError(404, '未找到该发送任务，请核对微信实际记录；不会自动重发。');
+        sendLocalJson(response, 200, { job });
+      }
       else if (write) {
         const input = await readLocalBody(request, route === '/config' ? 1_400_000 : 24_000);
         checkWorkspace(request);
@@ -108,12 +150,28 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           if (!config.settings.enabled) await adapter.pause();
         } else if (route === '/start') {
           empty();
+          runEpoch += 1;
           const config = await engine.getConfig();
           if (!config?.settings.enabled) throw new LocalError(400, '请先保存并启用接待规则。');
           await adapter.start(config);
           try { assertCurrent(); await engine.start(); } catch (error) { await adapter.pause(); throw error; }
           void poll().catch(() => {});
         } else if (route === '/pause') { empty(); await pause(); }
+        else if (route === '/followup') {
+          if (!input || Array.isArray(input) || Object.keys(input).some(key => key !== 'taskId') || typeof input.taskId !== 'string' || !input.taskId || input.taskId.length > 160 || /[\u0000-\u001f]/.test(input.taskId)) throw new LocalError(400, '一键跟进只接收已保存的任务编号。');
+          const ticket = runEpoch;
+          if (!(await engine.status()).running) throw new LocalError(409, '本地回复尚未运行，请在自动回复页核对规则后主动启动。');
+          if (!(await adapter.status({ probe: true })).canSend) throw new LocalError(409, '本地发送组件尚未就绪，请先检查并启用。');
+          const preparedResponse = await requestLocalAPI(`${address.origin}/api/followup`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { Origin: address.origin, 'Content-Type': 'application/json', 'X-Kexu-Local': '1', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) }, body: JSON.stringify({ taskId: input.taskId }) });
+          const prepared = await preparedResponse.json();
+          assertCurrent();
+          if (!preparedResponse.ok) throw new LocalError(preparedResponse.status, typeof prepared.error === 'string' ? prepared.error : '已保存的跟进任务尚不满足发送条件。');
+          if (!prepared || Object.keys(prepared).some(key => !['taskId', 'customerId', 'text'].includes(key)) || prepared.taskId !== input.taskId || typeof prepared.customerId !== 'string' || !prepared.customerId || typeof prepared.text !== 'string' || !prepared.text.trim() || prepared.text.length > 300 || !prepared.text.isWellFormed() || prepared.text.includes('\0')) throw new LocalError(502, '已保存的跟进话术回执无法核验，未发送。');
+          if (ticket !== runEpoch || !(await engine.status()).running) throw new LocalError(409, '准备跟进期间接待已暂停或规则变化，未发送。');
+          const followup = await engine.enqueueFollowup(prepared);
+          assertCurrent();
+          sendLocalJson(response, 200, { followup, job: followup.jobId ? await engine.getJob(followup.jobId) : null }); return true;
+        }
         else if (route === '/takeover') { await engine.takeover(input); await adapter.syncConfig(await engine.getConfig()); }
         else if (route === '/work') { empty(); sendLocalJson(response, 200, await engine.claimWork()); return true; }
         else {
@@ -142,6 +200,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
 
   async function close() {
     closed = true;
+    runEpoch += 1; pollController?.abort();
     clearInterval(timer);
     let stopping;
     try { stopping = Promise.resolve(adapter.pause()); } catch (error) { stopping = Promise.reject(error); }
