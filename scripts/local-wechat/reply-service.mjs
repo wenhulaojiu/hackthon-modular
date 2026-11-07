@@ -2,6 +2,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createReplyEngine } from './reply-engine.mjs';
+import { GenerationError, normalizeGenerationFailure } from './reply-generation-errors.mjs';
 import { createReplyAdapter } from './reply-adapter.mjs';
 import { containsCredentialLikeText } from './credential-guard.mjs';
 import { assertAdditiveEnrollment, requestReplyEnrollment } from './reply-enrollment.mjs';
@@ -28,21 +29,42 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
     if (workspace && incoming.headers['x-kexu-workspace'] !== workspace.workspaceToken) throw new LocalError(409, '微信工作区已切换，请刷新页面后重试。', 'WORKSPACE_CHANGED');
   }
   const generateReply = suppliedGenerate || (async (work, { signal } = {}) => {
-    if (containsCredentialLikeText(work.message?.text) || work.messages?.some(message => containsCredentialLikeText(message?.text))) throw new Error('消息可能包含密钥，已停止自动处理，请人工核对。');
+    if (containsCredentialLikeText(work.message?.text) || work.messages?.some(message => containsCredentialLikeText(message?.text))) throw new GenerationError('AI_INPUT_CREDENTIAL_BLOCKED', 400);
     let scopedTest = false;
     try {
       const policy = JSON.parse(await readFile(path.join(root, '.local-wechat', 'reply-adapter.json'), 'utf8'));
       scopedTest = policy.type === 'scoped-test-http' && policy.workspaceToken === workspace?.workspaceToken;
     } catch { /* 没有临时测试配置时沿用正常接待上下文。 */ }
     // 本地身份cookie仅在回环开发服务有效，云端不接受此身份。
-    const response = await request(`${address.origin}/api/reply`, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(75_000)]),
-      headers: { Origin: address.origin, 'Content-Type': 'application/json', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) },
-      // 临时验收只提交本批新问题，不把历史导入资料作为模型上下文。
-      body: JSON.stringify({ customerId: work.customerId, message: work.message, ...(work.messages ? { messages: work.messages } : {}), context: scopedTest || nativeSender && nativeVerificationMode === true ? [] : (work.context || []).filter(message => !containsCredentialLikeText(message?.text)) }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '接待回复生成失败，请检查AI配置。');
+    const timeoutSignal = AbortSignal.timeout(75_000);
+    const requestSignal = AbortSignal.any([signal || new AbortController().signal, timeoutSignal]);
+    let response;
+    try {
+      response = await request(`${address.origin}/api/reply`, {
+        method: 'POST', redirect: 'error', signal: requestSignal,
+        headers: { Origin: address.origin, 'Content-Type': 'application/json', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) },
+        // 临时验收只提交本批新问题，不把历史导入资料作为模型上下文。
+        body: JSON.stringify({ customerId: work.customerId, message: work.message, ...(work.messages ? { messages: work.messages } : {}), context: scopedTest || nativeSender && nativeVerificationMode === true ? [] : (work.context || []).filter(message => !containsCredentialLikeText(message?.text)) }),
+      });
+    } catch (error) {
+      // 接管或新消息会使租约失效；不能将其错误内容用于下一项任务。
+      throw new GenerationError(timeoutSignal.aborted || error?.name === 'TimeoutError' ? 'AI_TIMEOUT' : signal?.aborted ? 'AI_UNKNOWN' : 'AI_NETWORK_UNREACHABLE');
+    }
+    const httpFailure = code => {
+      const known = normalizeGenerationFailure({ code }).code;
+      if (known !== 'AI_UNKNOWN') return new GenerationError(known, response.status);
+      // 未带应用错误码的401/403来自本地访问层，不能据此推断模型密钥失效。
+      const fallback = response.status === 429 ? 'AI_RATE_LIMITED' : response.status === 504 ? 'AI_TIMEOUT' : 'AI_UNKNOWN';
+      return new GenerationError(fallback, response.status);
+    };
+    let data;
+    try { data = await response.json(); }
+    catch {
+      if (timeoutSignal.aborted) throw new GenerationError('AI_TIMEOUT');
+      throw response.ok ? new GenerationError('AI_RESPONSE_FORMAT', 502) : httpFailure();
+    }
+    // 只接收应用端固定错误码；不透传API或供应商返回的正文与error字段。
+    if (!response.ok) throw httpFailure(data?.code);
     return data;
   });
   const generate = async (...args) => { assertCurrent(); const result = await generateReply(...args); assertCurrent(); return result; };
@@ -263,7 +285,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
             if (!input || Object.keys(input).some(key => key !== 'reason') || (input.reason !== undefined && (typeof input.reason !== 'string' || input.reason.length > 500))) throw new LocalError(400, '请填写500字以内的取消原因。');
             await engine.reject(match[1], input.reason);
           } else {
-            if (!input || Object.keys(input).some(key => !['leaseId', 'result', 'error'].includes(key))) throw new LocalError(400, '草稿结果格式不正确。');
+            if (!input || Object.keys(input).some(key => !['leaseId', 'result', 'error', 'failureCode'].includes(key))) throw new LocalError(400, '草稿结果格式不正确。');
             await engine.completeWork({ jobId: match[1], ...input });
           }
         }

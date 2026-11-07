@@ -1409,3 +1409,161 @@ test('明确预算在多轮旧询价已确认留货及旧预算后连续直答�
     assert.deepEqual(await f.server.loadState('alice'), before);
   } finally { f.close(); }
 });
+
+async function syntheticRecommendationFixture(f) {
+  const input = await replyFixture(f), loaded = await f.server.loadState('alice');
+  loaded.state.products = [
+    { id: 'recommend-roll', name: '合成软包', type: 'product', price: 10, stock: 9, enabled: true, description: '合成目录商品。', faq: [] },
+    { id: 'recommend-black', name: '合成黑咖', type: 'product', price: 18, stock: 9, enabled: true, description: '合成目录商品。', faq: [] },
+    { id: 'recommend-high', name: '合成高价品', type: 'product', price: 28, stock: 9, enabled: true, description: '合成目录商品。', faq: [] },
+    { id: 'recommend-service', name: '合成咨询', type: 'service', price: 15, enabled: true, description: '合成目录服务。', faq: [] },
+    { id: 'recommend-empty', name: '合成缺货品', type: 'product', price: 12, stock: 0, enabled: true, description: '合成缺货目录商品。', faq: [] },
+    { id: 'recommend-hidden', name: '合成停用品', type: 'product', price: 1, stock: 9, enabled: false, description: '合成停用目录商品。', faq: [] },
+  ];
+  await f.server.saveState('alice', loaded.state, loaded.revision);
+  await f.server.removeKey('alice');
+  return input;
+}
+
+const recommendationTurn = (sender, text) => ({ sender, text, date: '2026-11-07T10:00:00Z' });
+const simpleRecommendationHistory = () => [
+  recommendationTurn('customer', '想咨询合成软包'),
+  recommendationTurn('customer', '合成软包多少钱一份'),
+  recommendationTurn('merchant', '合成软包标价10元。'),
+  recommendationTurn('customer', '.'),
+  recommendationTurn('customer', '你好，合成黑咖多少钱'),
+  recommendationTurn('merchant', '合成黑咖18元。'),
+  recommendationTurn('customer', '请给我留一份'),
+  recommendationTurn('merchant', '收到'),
+  recommendationTurn('customer', '合成软包有什么口味'),
+  recommendationTurn('merchant', '口味以店员核实为准。'),
+  recommendationTurn('customer', '店里卖哪些商品'),
+  recommendationTurn('merchant', '参考已保存目录。'),
+];
+
+test('普通泛推荐结合多轮询价确认及留货历史直接读目录，不需密钥也不调用模型', async t => {
+  const f = fixture();
+  try {
+    const input = await syntheticRecommendationFixture(f), before = await f.server.loadState('alice');
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => { calls++; throw Error('合成泛推荐不应请求模型'); });
+    for (const text of ['有什么推荐的', '推荐几款', '帮我推荐一下产品']) {
+      const body = { ...input, message: { ...input.message, text }, context: simpleRecommendationHistory() };
+      const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', body)));
+      assert.equal(response.status, 200, text);
+      const result = await response.json();
+      assert.equal(result.action, 'reply', text);
+      assert.deepEqual(result.productIds, text.includes('产品') ? ['recommend-roll', 'recommend-black', 'recommend-high'] : ['recommend-roll', 'recommend-black', 'recommend-high', 'recommend-service']);
+      assert.match(result.reply, /合成软包：标价10元/);
+      assert.match(result.reply, /合成黑咖：标价18元/);
+      assert.doesNotMatch(result.reply, /合成缺货品|合成停用品|已为您预留|已下单/);
+    }
+    assert.equal(calls, 0);
+    assert.equal(await f.server.hasSavedKey('alice'), false);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+test('普通泛推荐继承六轮之前的20元预算和商品范围，不扩大到高价品或服务', async t => {
+  const f = fixture();
+  try {
+    const input = await syntheticRecommendationFixture(f), before = await f.server.loadState('alice');
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => { calls++; throw Error('历史预算推荐不应请求模型'); });
+    for (const budget of ['我的预算只有20元。', '20元推荐几款产品']) {
+      const context = [recommendationTurn('customer', budget), recommendationTurn('merchant', '收到您的预算。'), ...simpleRecommendationHistory()];
+      assert.ok(context.length > 6);
+      const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', { ...input, message: { ...input.message, text: '有什么推荐的' }, context })));
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.action, 'reply', budget);
+      assert.deepEqual(result.productIds, ['recommend-roll', 'recommend-black'], budget);
+      assert.match(result.reply, /10元[\s\S]*18元/);
+      assert.doesNotMatch(result.reply, /合成高价品|合成咨询|28元|15元|合成缺货品|合成停用品/);
+    }
+    assert.equal(calls, 0);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+test('历史条件无法完整确认时泛推荐返回固定澄清，不丢历史限制也不调用模型', async t => {
+  const f = fixture();
+  try {
+    const input = await syntheticRecommendationFixture(f), before = await f.server.loadState('alice');
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => { calls++; throw Error('不明历史条件不应请求模型'); });
+    for (const condition of ['需要适合露营携带的防潮款', '我不能吃奶制品', '只看20块以内的饮品']) {
+      const context = [recommendationTurn('customer', condition), recommendationTurn('merchant', '收到您的需求。'), ...simpleRecommendationHistory()];
+      const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', { ...input, message: { ...input.message, text: '有什么推荐的' }, context })));
+      assert.equal(response.status, 200, condition);
+      const result = await response.json();
+      assert.equal(result.action, 'clarify', condition);
+      assert.equal(result.reply, '您希望推荐哪类商品或服务？也可以告诉我用途或预算。');
+      assert.deepEqual(result.productIds, []);
+      assert.doesNotMatch(result.reply, /10元|18元|合成软包|合成黑咖/);
+    }
+    assert.equal(calls, 0);
+    assert.deepEqual(await f.server.loadState('alice'), before);
+  } finally { f.close(); }
+});
+
+test('回复API关键生成故障返回安全错误码，供应商正文密钥及堆栈不透出', async t => {
+  const leak = 'SYNTHETIC_PROVIDER_PRIVATE_ERROR_DO_NOT_RETURN';
+  const providerKey = 'sk-synthetic-provider-private-value';
+  const providerBody = `${leak} ${providerKey}`;
+  const cases = [
+    { name: '缺少密钥', code: 'AI_KEY_MISSING', status: 400, missingKey: true },
+    { name: '上游401', code: 'AI_AUTH_REJECTED', status: 502, response: () => Response.json({ error: { message: providerBody } }, { status: 401 }) },
+    { name: '上游403', code: 'AI_AUTH_REJECTED', status: 502, response: () => new Response(providerBody, { status: 403 }) },
+    { name: '上游429', code: 'AI_RATE_LIMITED', status: 429, response: () => Response.json({ error: { message: providerBody } }, { status: 429 }) },
+    { name: '上游500', code: 'AI_UPSTREAM_ERROR', status: 502, response: () => new Response(providerBody, { status: 500 }) },
+    { name: '网络异常', code: 'AI_NETWORK_UNREACHABLE', status: 502, response: () => { throw new TypeError(providerBody); } },
+    { name: 'HTTP响应非法JSON', code: 'AI_RESPONSE_FORMAT', status: 502, response: () => new Response(`<html>${providerBody}</html>`, { status: 200 }) },
+    { name: 'HTTP响应结构不兼容', code: 'AI_RESPONSE_FORMAT', status: 502, response: () => Response.json({ choices: [], error: providerBody }) },
+    { name: '模型内容非法JSON', code: 'AI_RESPONSE_FORMAT', status: 502, response: () => modelResponse(providerBody) },
+    { name: '模型结果schema不符', code: 'AI_RESPONSE_FORMAT', status: 502, response: () => modelResponse({ action: 'reply', reply: providerBody, reason: '', productIds: [] }) },
+    { name: '模型空内容', code: 'AI_RESPONSE_EMPTY', status: 502, response: () => modelResponse(' \n ') },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async child => {
+    const f = fixture();
+    try {
+      const input = await replyFixture(f), before = await f.server.loadState('alice');
+      if (scenario.missingKey) await f.server.removeKey('alice');
+      let calls = 0;
+      child.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        if (!scenario.response) throw Error('缺少密钥时不得调用模型');
+        return scenario.response();
+      });
+      const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', input)));
+      assert.equal(response.status, scenario.status);
+      const body = await response.json();
+      assert.equal(body.code, scenario.code);
+      assert.equal(typeof body.error, 'string');
+      assert.ok(body.error.length > 0);
+      assert.deepEqual(Object.keys(body).sort(), ['code', 'error']);
+      const serialized = JSON.stringify(body);
+      assert.ok(!serialized.includes(leak));
+      assert.ok(!serialized.includes(providerKey));
+      assert.ok(!serialized.includes('sk-unit-only-0123456789'));
+      assert.doesNotMatch(serialized, /TypeError|\bat callModel\b|\bat runReplyAI\b/);
+      assert.equal(calls, scenario.missingKey ? 0 : 1);
+      assert.deepEqual(await f.server.loadState('alice'), before);
+    } finally { f.close(); }
+  });
+});
+
+test('本地登录或同源拒绝不冒充模型认证失败，不调用模型', async t => {
+  const f = fixture();
+  try {
+    const input = await replyFixture(f); let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => { calls++; throw Error('应用访问拒绝不得请求模型'); });
+    const unauthenticated = await f.replyRoute.POST(post('reply', input));
+    assert.equal(unauthenticated.status, 401);
+    assert.equal((await unauthenticated.json()).code, undefined);
+    const crossOrigin = await f.asUser('alice', () => f.replyRoute.POST(post('reply', input, { origin: 'https://outside.example' })));
+    assert.equal(crossOrigin.status, 403);
+    assert.equal((await crossOrigin.json()).code, undefined);
+    assert.equal(calls, 0);
+  } finally { f.close(); }
+});

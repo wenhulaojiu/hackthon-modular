@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, lstat } from "node:fs/promises";
 import path from "node:path";
 import { assertAdditiveEnrollment, isEnrollmentChatId } from "./reply-enrollment.mjs";
+import { GenerationError, normalizeGenerationFailure } from "./reply-generation-errors.mjs";
 
 export const DEFAULT_WELCOME_MESSAGE = "您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。";
 
@@ -231,7 +232,7 @@ export async function createReplyEngine(options = {}) {
   }
 
   function publicJob(job) {
-    return { id: job.id, kind: job.kind || "reply", ...(job.kind === "followup" ? { taskId: job.taskId } : {}), ...(job.kind === "manual" ? { sourceJobId: job.sourceJobId, requestId: job.requestId, ...(job.autoResumeStatus ? { autoResumeStatus: job.autoResumeStatus } : {}), ...(job.autoResumeReason ? { autoResumeReason: job.autoResumeReason } : {}) } : {}), ...(job.resolvedAt ? { resolvedAt: job.resolvedAt, resolvedByManualJobId: job.resolvedByManualJobId } : {}), customerId: job.customerId, chatId: job.chatId, message: copy(job.message), messages: copy(job.messages || [job.message]), ...(job.quietUntil !== undefined ? { quietUntil: new Date(job.quietUntil).toISOString() } : {}), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
+    return { id: job.id, kind: job.kind || "reply", ...(job.kind === "followup" ? { taskId: job.taskId } : {}), ...(job.kind === "manual" ? { sourceJobId: job.sourceJobId, requestId: job.requestId, ...(job.autoResumeStatus ? { autoResumeStatus: job.autoResumeStatus } : {}), ...(job.autoResumeReason ? { autoResumeReason: job.autoResumeReason } : {}) } : {}), ...(job.resolvedAt ? { resolvedAt: job.resolvedAt, resolvedByManualJobId: job.resolvedByManualJobId } : {}), customerId: job.customerId, chatId: job.chatId, message: copy(job.message), messages: copy(job.messages || [job.message]), ...(job.quietUntil !== undefined ? { quietUntil: new Date(job.quietUntil).toISOString() } : {}), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.failureCode ? { failureCode: normalizeGenerationFailure({ code: job.failureCode }).code } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
   }
 
   async function status() {
@@ -307,7 +308,7 @@ export async function createReplyEngine(options = {}) {
   }
 
   function resultInput(value) {
-    if (!value || !["reply", "handoff", "ignore", "clarify"].includes(value.action) || !text(value.reply, 4000, true) || !text(value.reason, 800) || value.productIds !== undefined && (!Array.isArray(value.productIds) || value.productIds.length > 20 || value.productIds.some((id) => !safeId(id)))) fail("AI 回复结果格式不正确。");
+    if (!value || !["reply", "handoff", "ignore", "clarify"].includes(value.action) || !text(value.reply, 4000, true) || !text(value.reason, 800) || value.productIds !== undefined && (!Array.isArray(value.productIds) || value.productIds.length > 20 || value.productIds.some((id) => !safeId(id)))) throw new GenerationError("AI_RESPONSE_FORMAT", 400);
     return { action: value.action, reply: value.reply.trim(), reason: value.reason, productIds: value.productIds || [] };
   }
 
@@ -329,7 +330,12 @@ export async function createReplyEngine(options = {}) {
     const completed = await mutate((next) => {
       const job = next.jobs.find((item) => item.id === input.jobId);
       if (!job || job.status !== "generating" || job.leaseId !== input.leaseId || job.leaseUntil <= now()) fail("此生成任务已失效，未发送回复。", 409);
-      if (input.error !== undefined) { setHandoff(next, job, text(input.error, 800) ? input.error : "AI 生成失败，请检查设置后人工处理。", "failed"); return publicJob(job); }
+      if (input.error !== undefined) {
+        const failure = normalizeGenerationFailure({ code: input.failureCode });
+        job.failureCode = failure.code;
+        setHandoff(next, job, failure.reason, "failed");
+        return publicJob(job);
+      }
       const blocked = gate(next, job, false);
       if (blocked && blocked.action !== "defer") { setHandoff(next, job, blocked.reason); return publicJob(job); }
       if (job.configRevision !== next.configRevision) { setHandoff(next, job, "生成期间门店资料或规则已变化，请人工审核。"); return publicJob(job); }
@@ -416,7 +422,13 @@ export async function createReplyEngine(options = {}) {
           const controller = new AbortController(); generationControllers.set(item.leaseId, controller);
           track((async () => {
             try { const result = await generate(copy(item), { signal: controller.signal }); if (!closed) await completeWork({ jobId: item.id, leaseId: item.leaseId, result }); }
-            catch { if (!closed) { try { await completeWork({ jobId: item.id, leaseId: item.leaseId, error: "AI 生成失败，已转人工，请检查模型配置。" }); } catch { /* 过期或已接管的任务不会重新发送。 */ } } }
+            catch (error) {
+              if (!closed) {
+                const failure = normalizeGenerationFailure(error);
+                try { await completeWork({ jobId: item.id, leaseId: item.leaseId, error: failure.reason, failureCode: failure.code }); }
+                catch { /* 过期或已接管的任务不会重新发送。 */ }
+              }
+            }
             finally { generationControllers.delete(item.leaseId); }
           })());
         }

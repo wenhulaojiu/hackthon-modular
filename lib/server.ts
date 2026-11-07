@@ -7,7 +7,7 @@ import { userSecrets, userStates } from "@/db/schema";
 import { demoSeed } from "@/lib/seed";
 import type { AIResult, AppState, ReplyResult, Settings } from "@/lib/types";
 import { assessReplyContext, CLARIFY_REPLY } from '@/lib/reply-context';
-import { suggestCatalogReply } from '@/lib/reply-catalog';
+import { suggestCatalogReply, isGenericRecommendationRequest } from '@/lib/reply-catalog';
 import { unverifiedReplyAmounts } from '@/lib/reply-money';
 import { migrateCompetitionCatalog } from '@/lib/competition-demo';
 
@@ -265,12 +265,12 @@ function fromBase64(value: string): Uint8Array<ArrayBuffer> { return Uint8Array.
 
 async function encryptionKey(): Promise<CryptoKey> {
   const encoded = env.APP_ENCRYPTION_KEY;
-  if (!encoded) throw new ApiError(503, "服务端尚未配置密钥加密，请联系管理员设置 APP_ENCRYPTION_KEY。");
+  if (!encoded) throw new ApiError(503, "服务端尚未配置密钥加密，请联系管理员设置 APP_ENCRYPTION_KEY。", { code: "AI_KEY_ENCRYPTION_CONFIG" });
   try {
     const bytes = fromBase64(encoded.trim());
     if (bytes.byteLength !== 32) throw new Error("invalid encryption key");
     return await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-  } catch { throw new ApiError(503, "服务端密钥加密配置不正确，请联系管理员。"); }
+  } catch { throw new ApiError(503, "服务端密钥加密配置不正确，请联系管理员。", { code: "AI_KEY_ENCRYPTION_CONFIG" }); }
 }
 
 export async function storeKey(userId: string, apiKey: string): Promise<void> {
@@ -285,24 +285,24 @@ export async function removeKey(userId: string): Promise<void> { await getDb().d
 
 async function readKey(userId: string): Promise<string> {
   const record = await getDb().select().from(userSecrets).where(eq(userSecrets.userId, userId)).get();
-  if (!record) throw new ApiError(400, "请先在设置中保存模型 API Key。");
+  if (!record) throw new ApiError(400, "请先在设置中保存模型 API Key。", { code: "AI_KEY_MISSING" });
   const key = await encryptionKey();
   try {
     const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(record.nonce), additionalData: encoder.encode(`${userId}:v1`) }, key, fromBase64(record.ciphertext));
     return new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-  } catch { throw new ApiError(503, "已保存的 API Key 无法解密，请重新保存密钥。"); }
+  } catch { throw new ApiError(503, "已保存的 API Key 无法解密，请重新保存密钥。", { code: "AI_KEY_DECRYPT_FAILED" }); }
 }
 
 // 只接受公共 HTTPS 域名，阻止本机、内网 IP、凭据和重定向式 SSRF。
 export function chatCompletionUrl(baseUrl: string): string {
   let url: URL;
-  try { url = new URL(baseUrl.trim() || DEFAULT_BASE_URL); } catch { throw new ApiError(400, "模型地址不是有效的 HTTPS 地址。"); }
+  try { url = new URL(baseUrl.trim() || DEFAULT_BASE_URL); } catch { throw new ApiError(400, "模型地址不是有效的 HTTPS 地址。", { code: "AI_ENDPOINT_INVALID" }); }
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   const invalidHost = !host.includes(".") || host.startsWith("[") || /^[\d.]+$/.test(host)
     || /(^|[.-])(?:127|10|0|169[.-]254|192[.-]168|172[.-](?:1[6-9]|2\d|3[01]))[.-]/.test(host)
     || ["localhost", "local", "localdomain", "internal", "intranet", "lan", "home", "test", "invalid", "onion"].some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
   if (url.protocol !== "https:" || invalidHost || url.username || url.password || (url.port && url.port !== "443") || url.search || url.hash) {
-    throw new ApiError(400, "模型地址需使用公共 HTTPS 域名，且不能包含账号、查询参数或特殊端口。");
+    throw new ApiError(400, "模型地址需使用公共 HTTPS 域名，且不能包含账号、查询参数或特殊端口。", { code: "AI_ENDPOINT_INVALID" });
   }
   const path = url.pathname.replace(/\/+$/, "");
   url.pathname = path.endsWith("/chat/completions") ? path : `${path}/chat/completions`;
@@ -322,7 +322,7 @@ const extractResult = z.object({ orders: z.array(z.object({
 
 function jsonFromModel(content: string): unknown {
   const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  try { return JSON.parse(cleaned); } catch { throw new ApiError(502, "模型未返回有效 JSON，请检查提示词或重试。"); }
+  try { return JSON.parse(cleaned); } catch { throw new ApiError(502, "模型未返回有效 JSON，请检查提示词或重试。", { code: "AI_RESPONSE_FORMAT" }); }
 }
 
 async function callModel(settings: Settings["ai"], apiKey: string, messages: Array<{ role: "system" | "user"; content: string }>): Promise<string> {
@@ -338,9 +338,9 @@ async function callModel(settings: Settings["ai"], apiKey: string, messages: Arr
       const localEnv = env as typeof env & { KEXU_MODEL_BRIDGE_URL?: string; KEXU_MODEL_BRIDGE_TOKEN?: string };
       let bridge: URL;
       try { bridge = new URL(localEnv.KEXU_MODEL_BRIDGE_URL ?? ""); }
-      catch { throw new ApiError(503, "本机模型网络服务尚未就绪，请重新启动本地版。"); }
+      catch { throw new ApiError(503, "本机模型网络服务尚未就绪，请重新启动本地版。", { code: "AI_TRANSPORT_CONFIG" }); }
       if (bridge.protocol !== "http:" || bridge.hostname !== "127.0.0.1" || bridge.pathname !== "/__local-wechat/model-transport" || bridge.username || bridge.password || bridge.search || bridge.hash || !/^[a-f0-9]{64}$/.test(localEnv.KEXU_MODEL_BRIDGE_TOKEN ?? "")) {
-        throw new ApiError(503, "本机模型网络配置无效，请重新启动本地版。");
+        throw new ApiError(503, "本机模型网络配置无效，请重新启动本地版。", { code: "AI_TRANSPORT_CONFIG" });
       }
       requestUrl = bridge.href;
       headers["X-Kexu-Model-Token"] = localEnv.KEXU_MODEL_BRIDGE_TOKEN!;
@@ -354,7 +354,7 @@ async function callModel(settings: Settings["ai"], apiKey: string, messages: Arr
     // Workerd 不支持 redirect:error；手动拒绝所有重定向，避免密钥被转发到其他地址。
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel();
-      throw new ApiError(502, "模型服务返回了重定向，请填写最终 HTTPS 接口地址。");
+      throw new ApiError(502, "模型服务返回了重定向，请填写最终 HTTPS 接口地址。", { code: "AI_ENDPOINT_INVALID" });
     }
     const transportError = localTransport ? response.headers.get("X-Kexu-Transport-Error") : null;
     if (transportError) {
@@ -366,27 +366,32 @@ async function callModel(settings: Settings["ai"], apiKey: string, messages: Arr
         config: "本机模型代理配置无效，请检查本地网络设置。",
         invalid_response: "模型服务返回了不兼容或过大的响应，请检查接口配置。",
       };
-      throw new ApiError(502, messages[transportError] ?? "本机模型网络服务暂时不可用，请稍后重试。");
+      const codes: Record<string, string> = {
+        proxy_unreachable: "AI_PROXY_UNREACHABLE", upstream_unreachable: "AI_NETWORK_UNREACHABLE",
+        tls: "AI_TLS_ERROR", config: "AI_TRANSPORT_CONFIG", invalid_response: "AI_RESPONSE_FORMAT",
+      };
+      throw new ApiError(502, messages[transportError] ?? "本机模型网络服务暂时不可用，请稍后重试。", { code: codes[transportError] ?? "AI_UNKNOWN" });
     }
     if (!response.ok) {
       await response.body?.cancel();
-      if ([401, 403].includes(response.status)) throw new ApiError(502, "模型服务拒绝了 API Key，请检查密钥和账户权限。");
-      if (response.status === 429) throw new ApiError(429, "模型服务请求受限或额度不足，请检查账户后重试。");
-      throw new ApiError(502, `模型服务请求失败（HTTP ${response.status}），请检查地址、模型名称或服务状态。`);
+      if ([401, 403].includes(response.status)) throw new ApiError(502, "模型服务拒绝了 API Key，请检查密钥和账户权限。", { code: "AI_AUTH_REJECTED" });
+      if (response.status === 429) throw new ApiError(429, "模型服务请求受限或额度不足，请检查账户后重试。", { code: "AI_RATE_LIMITED" });
+      throw new ApiError(502, `模型服务请求失败（HTTP ${response.status}），请检查地址、模型名称或服务状态。`, { code: "AI_UPSTREAM_ERROR" });
     }
     let data: unknown;
     try { data = await readJson(response, 100_000); }
     catch {
-      if (controller.signal.aborted) throw new ApiError(504, "模型服务响应超时，请稍后重试。");
-      throw new ApiError(502, "模型服务返回了无效或过大的响应，请检查兼容接口配置。");
+      if (controller.signal.aborted) throw new ApiError(504, "模型服务响应超时，请稍后重试。", { code: "AI_TIMEOUT" });
+      throw new ApiError(502, "模型服务返回了无效或过大的响应，请检查兼容接口配置。", { code: "AI_RESPONSE_FORMAT" });
     }
     const parsed = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string() }) })).min(1) }).safeParse(data);
-    if (!parsed.success || !parsed.data.choices[0].message.content.trim()) throw new ApiError(502, "模型服务返回了空内容或不兼容的响应。");
+    if (!parsed.success) throw new ApiError(502, "模型服务返回了不兼容的响应。", { code: "AI_RESPONSE_FORMAT" });
+    if (!parsed.data.choices[0].message.content.trim()) throw new ApiError(502, "模型服务返回了空内容。", { code: "AI_RESPONSE_EMPTY" });
     return parsed.data.choices[0].message.content;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    if (controller.signal.aborted) throw new ApiError(504, "模型服务响应超时，请稍后重试。");
-    throw new ApiError(502, "无法连接模型服务，请检查 HTTPS 地址和供应商状态。");
+    if (controller.signal.aborted) throw new ApiError(504, "模型服务响应超时，请稍后重试。", { code: "AI_TIMEOUT" });
+    throw new ApiError(502, "无法连接模型服务，请检查 HTTPS 地址和供应商状态。", { code: "AI_NETWORK_UNREACHABLE" });
   } finally { clearTimeout(timer); }
 }
 
@@ -497,6 +502,8 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   // 简单目录咨询直接读取已保存字段；复合需求继续结合上下文和商品资料判断。
   const catalogReply = suggestCatalogReply(products, incomingMessages, conversation, settings.maxReplyChars);
   if (catalogReply) return catalogReply;
+  // 泛推荐的历史需求尚不明确时先询问方向，不调用模型编造或丢弃已有条件。
+  if (isGenericRecommendationRequest(incomingMessages)) return { action: 'clarify', reply: '您希望推荐哪类商品或服务？也可以告诉我用途或预算。', reason: '当前推荐需求尚需确认，先询问本次方向，保留此前限制。', productIds: [] };
   const intent = assessReplyContext(incomingMessages, conversation, products.map(product => product.name));
   if (intent === 'ignore') return { action: 'ignore', reply: '', reason: '结合最近对话，当前消息是招呼、确认或无具体问题的标点，无需再次介绍或报价。', productIds: [] };
   if (intent === 'clarify') return { action: 'clarify', reply: CLARIFY_REPLY, reason: '当前消息的商品指代或咨询内容尚不明确，先询问具体需求。', productIds: [] };
@@ -543,7 +550,7 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   ]);
   const schema = z.object({ action: z.enum(["reply", "handoff", "ignore", "clarify"]), reply: z.string().max(4000), reason: z.string().min(1).max(800), clarificationKind: z.enum(['need_details', 'missing_knowledge']).optional(), productIds: z.array(id).max(20).optional(), grounding: z.array(z.object({ sourceId: z.string().max(240), quote: z.string().min(4).max(2000).optional(), quoteIndex: z.number().int().min(0).max(4).optional() }).strict().refine(item => item.quote !== undefined || item.quoteIndex !== undefined)).max(20).optional() }).strict();
   const parsed = schema.safeParse(jsonFromModel(content));
-  if (!parsed.success) throw new ApiError(502, "自动回复模型返回格式不正确，已停止自动发送。");
+  if (!parsed.success) throw new ApiError(502, "自动回复模型返回格式不正确，已停止自动发送。", { code: "AI_RESPONSE_FORMAT" });
   const result = parsed.data;
   if (result.action === 'ignore') return { action: 'ignore', reply: '', reason: result.reason, productIds: [] };
   // 资料不足只使用固定告知文案，不采用模型未经核验的商品细节。

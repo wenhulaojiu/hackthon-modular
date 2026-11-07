@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { createLocalReplyService } from '../scripts/local-wechat/reply-service.mjs';
 import { DEFAULT_REPLY_SETTINGS } from '../scripts/local-wechat/reply-engine.mjs';
 import { containsCredentialLikeText } from '../scripts/local-wechat/credential-guard.mjs';
+import { GENERATION_FAILURES } from '../scripts/local-wechat/reply-generation-errors.mjs';
 
 const configuration = () => ({ settings: { ...structuredClone(DEFAULT_REPLY_SETTINGS), debounceSeconds: 0, enabled: true, selectedCustomerIds: ['customer-one'], businessHours: { enabled: false, start: '09:00', end: '18:00', days: [1] } }, customers: [{ id: 'customer-one', wechatId: 'wxid_one', name: '合成客户', autoReplyEnabled: true }], products: [{ id: 'service-one', type: 'service', name: '洗护', price: 128, description: '洗护服务，按预约时间到店。', faq: [], enabled: true }], storeName: '合成测试门店', industry: '通用门店' });
 
@@ -199,6 +200,7 @@ test('本批新消息含疑似密钥时在模型前停止，整批不生成且�
   assert.equal(state.counts.failed, 1);
   assert.equal(state.jobs.length, 1);
   assert.equal(state.jobs[0].messages.length, 2, '疑似密钥不能通过删除本批证据绕过校验');
+  assert.equal(state.jobs[0].failureCode, 'AI_INPUT_CREDENTIAL_BLOCKED');
   assert.equal(requests, 0, '本批疑似密钥不能提交给模型');
   assert.equal(sends, 0, '本批停止后不能发送回复');
   assert.ok(!state.jobs[0].reason.includes('SYNTHETIC_NEW_CREDENTIAL_'), '错误原因不能包含密钥原文');
@@ -304,4 +306,63 @@ test('close先同步封禁原生发送再关闭引擎，并等待原生在途结
   assert.ok(finishPause); await Promise.resolve(); assert.equal(closed, false);
   finishPause(); await closing; f.hooks.pause = undefined;
   assert.equal(closed, true); assert.equal(f.calls.send.length, 0);
+});
+
+
+test('本地生成错误保留安全分类，非JSON与恶意供应商错误不进入队列也不触发重发', async t => {
+  const leak = 'SYNTHETIC_PROVIDER_SECRET_DO_NOT_PERSIST';
+  const cases = [
+    ['缺密钥', 'AI_KEY_MISSING', () => Response.json({ code: 'AI_KEY_MISSING', error: leak }, { status: 400 })],
+    ['上游认证', 'AI_AUTH_REJECTED', () => Response.json({ code: 'AI_AUTH_REJECTED', error: leak }, { status: 502 })],
+    ['本地401', 'AI_UNKNOWN', () => Response.json({ error: leak }, { status: 401 })],
+    ['本地403', 'AI_UNKNOWN', () => Response.json({ error: leak }, { status: 403 })],
+    ['额度受限', 'AI_RATE_LIMITED', () => Response.json({ error: leak }, { status: 429 })],
+    ['明确超时', 'AI_TIMEOUT', () => Response.json({ code: 'AI_TIMEOUT', error: leak }, { status: 504 })],
+    ['请求超时', 'AI_TIMEOUT', () => { throw new DOMException(leak, 'TimeoutError'); }],
+    ['连接异常', 'AI_NETWORK_UNREACHABLE', () => { throw new TypeError(leak); }],
+    ['模型格式', 'AI_RESPONSE_FORMAT', () => Response.json({ code: 'AI_RESPONSE_FORMAT', error: leak }, { status: 502 })],
+    ['成功状态非JSON', 'AI_RESPONSE_FORMAT', () => new Response(`<html>${leak}</html>`, { status: 200 })],
+    ['成功状态无效结构', 'AI_RESPONSE_FORMAT', () => Response.json({ error: leak }, { status: 200 })],
+    ['未知502', 'AI_UNKNOWN', () => Response.json({ code: 'UNTRUSTED_CODE', error: leak, cause: leak }, { status: 502 })],
+    ['故障状态非JSON', 'AI_UNKNOWN', () => new Response(`<html>${leak}</html>`, { status: 502 })],
+    ['原型字段', 'AI_UNKNOWN', () => Response.json({ code: '__proto__', error: leak }, { status: 502 })],
+  ];
+  for (const [label, expectedCode, responseFactory] of cases) await t.test(label, async child => {
+    const parent = await realpath(os.tmpdir());
+    const root = await mkdtemp(path.join(parent, 'kexu-generation-http-error-'));
+    let service, active = false, delivered = false, requests = 0, sends = 0;
+    const adapter = {
+      status: async () => ({ canReceive: true, canSend: false }), start: async () => { active = true; }, pause: () => { active = false; }, syncConfig: () => {}, fail: () => { active = false; },
+      poll: async () => { if (!active || delivered) return []; delivered = true; return [{ id: 'synthetic-error-event', nativeMessageId: '700001', chatId: 'wxid_one', sender: 'customer', text: '洗护多少钱？', date: new Date().toISOString(), kind: 'text', source: 'realtime' }]; },
+      send: async () => { sends++; throw new Error('分类测试不能发送'); },
+    };
+    const server = http.createServer((request, response) => { void service.handle(request, response).then(handled => { if (!handled) { response.statusCode = 404; response.end(); } }); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    service = await createLocalReplyService({ root, origin, adapter, pollMs: 60_000, fetch: async () => { requests++; return responseFactory(); } });
+    child.after(async () => {
+      await service.close(); await new Promise(resolve => server.close(resolve));
+      const actual = await realpath(root);
+      assert.equal(path.dirname(actual).toLowerCase(), parent.toLowerCase());
+      assert.ok(path.basename(actual).startsWith('kexu-generation-http-error-'));
+      await rm(actual, { recursive: true, force: true });
+    });
+    const call = async (route, body) => {
+      const response = await fetch(`${origin}/__local-wechat/replies${route}`, { method: 'POST', headers: { 'X-Kexu-Local': '1', Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(response.status, 200); return response.json();
+    };
+    await call('/config', configuration()); await call('/start', {});
+    let state;
+    const deadline = Date.now() + 4000;
+    do {
+      state = await service.status();
+      if (state.counts.failed === 1) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } while (Date.now() < deadline);
+    assert.equal(state.counts.failed, 1); assert.equal(state.jobs[0].failureCode, expectedCode); assert.equal(state.jobs[0].reason, GENERATION_FAILURES[expectedCode]);
+    await service.poll();
+    assert.equal(requests, 1); assert.equal(sends, 0); assert.ok(!JSON.stringify(await service.status()).includes(leak));
+    const persisted = await readFile(path.join(root, '.local-wechat', 'replies', 'queue.json'), 'utf8');
+    assert.ok(!persisted.includes(leak), '供应商错误正文和凭据不能持久化');
+  });
 });
