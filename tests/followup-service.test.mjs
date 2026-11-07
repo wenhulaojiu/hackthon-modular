@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -44,4 +45,16 @@ test('读取已保存话术期间用户暂停，迟到准备结果不能入队�
   let release; const entered = new Promise(resolve => { f.hooks.prepare = () => { resolve(); return new Promise(done => { release = done; }); }; });
   const sending = f.call('/followup', { taskId: 'task-one' }); await entered; await f.service.pause(); release();
   assert.equal((await sending).status, 409); assert.equal(f.sends.length, 0); assert.equal((await f.service.status()).jobs.length, 0);
+});
+
+test('批量预览摘要必须与准备API返回的UTF8正文完全一致，否则409且不创建发送任务', async t => {
+  const f = await fixture(t); await f.call('/start', {});
+  const digest = text => createHash('sha256').update(text, 'utf8').digest('hex');
+  assert.equal((await f.call('/followup', { taskId: 'task-one', expectedTextSha256: 'BAD-HASH' })).status, 400);
+  const changed = await f.call('/followup', { taskId: 'task-one', expectedTextSha256: digest('这是另一窗口修改前的旧话术。') });
+  assert.equal(changed.status, 409); assert.equal(f.sends.length, 0); assert.equal((await f.service.status()).jobs.length, 0);
+  const accepted = await f.call('/followup', { taskId: 'task-one', expectedTextSha256: digest('您好，最近使用体验怎么样？') }); assert.equal(accepted.status, 200);
+  let job;
+  for (let count = 0; count < 300; count++) { job = (await f.call(`/jobs/${accepted.data.job.id}`)).data.job; if (job.status === 'sent') break; await new Promise(resolve => setTimeout(resolve, 5)); }
+  assert.equal(job.status, 'sent'); assert.equal(f.sends.length, 1);
 });

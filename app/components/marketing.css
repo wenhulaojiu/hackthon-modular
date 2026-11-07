@@ -7,3 +7,31 @@
 .task-followup-status.attention { color: #9a5d30; }
 .task-followup-button { min-height: 38px; }
 @media (max-width: 600px) { .marketing-send-note { margin-right: 16px; margin-left: 16px; } .task-followup-button { flex: 1; } }
+
+/* 批量跟进沿用原页面的按钮与面板，预览和停止操作保留在同一弹窗。 */
+.followup-batch-toolbar { display: flex; align-items: center; gap: 8px; }
+.followup-batch-summary { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 22px 14px; padding: 11px 13px; border: 1px solid var(--kexu-line); border-radius: 10px; background: var(--kexu-panel); font-size: 13px; color: var(--kexu-muted); }
+.followup-batch-modal { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
+.followup-batch-modal .modal-heading { align-items: flex-start; }
+.followup-batch-modal .modal-heading p { margin: 8px 0 0; line-height: 1.6; }
+.followup-batch-modal .modal-actions { position: sticky; bottom: 0; z-index: 1; padding-top: 16px; border-top: 1px solid var(--kexu-line); background: #fff; box-shadow: 0 -12px 0 #fff; }
+.followup-batch-list { margin: 8px 0 20px; }
+.followup-batch-item { padding: 16px 0; border-bottom: 1px solid var(--kexu-line); }
+.followup-batch-item > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; }
+.followup-batch-item strong { font-size: 14px; font-weight: 600; }
+.followup-batch-item > div > span { color: var(--kexu-muted); font-size: 12px; }
+.followup-batch-item p { margin: 10px 0 0; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.followup-batch-item small { display: block; margin-top: 10px; font-size: 12px; color: var(--kexu-muted); overflow-wrap: anywhere; }
+.followup-batch-progress, .followup-batch-empty { padding: 12px 13px; margin: 12px 0; border-radius: 10px; background: var(--kexu-panel); font-size: 13px; line-height: 1.6; }
+.followup-batch-progress strong { font-weight: 500; }
+.followup-batch-progress p { margin: 8px 0 0; color: var(--kexu-muted); }
+.followup-batch-skipped { margin: 16px 0; font-size: 13px; }
+.followup-batch-skipped summary { padding: 8px 0; cursor: pointer; }
+.followup-batch-skipped > div { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--kexu-line); }
+.followup-batch-skipped strong { font-weight: 500; }
+.followup-batch-skipped span { color: var(--kexu-muted); line-height: 1.6; }
+@media (max-width: 720px) {
+  .followup-batch-toolbar { flex-wrap: wrap; }
+  .followup-batch-summary { margin-right: 16px; margin-left: 16px; }
+  .followup-batch-modal { padding: 20px; }
+}

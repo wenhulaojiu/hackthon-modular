@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createReplyEngine } from './reply-engine.mjs';
 import { createReplyAdapter } from './reply-adapter.mjs';
@@ -46,7 +47,47 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   });
   const generate = async (...args) => { assertCurrent(); const result = await generateReply(...args); assertCurrent(); return result; };
   const queueDirectory = path.join(root, '.local-wechat', 'replies', ...(workspace && workspace.id !== 'legacy' ? [workspace.id] : []));
-  const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, ...(typeof adapter.sendManual === 'function' ? { sendManual: input => { assertCurrent(); return adapter.sendManual(input); } } : {}), generate });
+  const localHeaders = () => ({ Origin: address.origin, 'X-Kexu-Local': '1', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) });
+  async function verifyManualActivity(job, echoes) {
+    if (typeof reader?.readForReplies !== 'function') throw new LocalError(409, '当前私聊无法只读核验，继续保留人工处理。');
+    const snapshots = await reader.readForReplies([job.chatId]);
+    assertCurrent();
+    if (!Array.isArray(snapshots) || snapshots.length !== 1 || snapshots[0]?.metadata?.chat_type !== 'private' || snapshots[0]?.metadata?.chat_username !== job.chatId || !Array.isArray(snapshots[0]?.messages)) throw new LocalError(409, '当前私聊读取范围无法核验，未恢复托管。');
+    const records = snapshots[0].messages;
+    const matches = records.filter(message => String(message.server_id || '') === job.sendMessageId && String(message.local_type) === '1' && message.sender === '我' && message.content === job.reply);
+    if (matches.length !== 1) throw new LocalError(409, '当前私聊未找到这条手动回复的完整原生回执，未恢复托管。');
+    const cutoff = Math.floor(Date.parse(job.createdAt) / 1000);
+    if (!Number.isFinite(cutoff)) throw new LocalError(409, '手动回复的时间范围无法核验，未恢复托管。');
+    const originalIds = new Set((job.messages || []).map(message => message.nativeMessageId).filter(id => typeof id === 'string' && /^[0-9]+$/.test(id)));
+    for (const message of records) {
+      const timestamp = Number(message.timestamp), nativeId = String(message.server_id || '');
+      if (!Number.isFinite(timestamp)) throw new LocalError(409, '私聊消息时间无法核验，未恢复托管。');
+      if (timestamp < cutoff || ['10000', '10002'].includes(String(message.local_type))) continue;
+      if (message.sender === '我' && echoes.some(echo => echo.messageId === nativeId && echo.text === message.content)) continue;
+      if (message.sender_username === job.chatId && originalIds.has(nativeId)) continue;
+      throw new LocalError(409, '手动回复期间或之后出现新消息，请先处理新的问题；原记录继续保留。');
+    }
+  }
+  const restoreManual = async ({ job, config, expectedRevision, echoes }) => {
+    assertCurrent();
+    const response = await requestLocalAPI(`${address.origin}/api/reply/manual-resume`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { Origin: address.origin, 'Content-Type': 'application/json', 'X-Kexu-Local': '1', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) }, body: JSON.stringify({ customerId: job.customerId, wechatId: job.chatId, expectedRevision }) });
+    const result = await response.json();
+    assertCurrent();
+    if (!response.ok) throw new LocalError(response.status, typeof result?.error === 'string' ? result.error : '客户资料已变化，未恢复托管。');
+    if (result?.customerId !== job.customerId || result?.wechatId !== job.chatId || result?.humanTakeover !== false || !Number.isSafeInteger(result?.revision) || ![expectedRevision, expectedRevision + 1].includes(result.revision)) throw new LocalError(502, '客户托管恢复回执无法核实，继续保留人工处理。');
+    stateRevision = result.revision;
+    await adapter.syncConfig(config);
+    assertCurrent();
+    await verifyManualActivity(job, echoes);
+    const latestResponse = await requestLocalAPI(`${address.origin}/api/state`, { redirect: 'error', signal: AbortSignal.timeout(30_000), headers: localHeaders() });
+    const latest = await latestResponse.json();
+    assertCurrent();
+    const customers = latest?.state?.customers;
+    const customer = Array.isArray(customers) ? customers.find(item => item.id === job.customerId) : null;
+    if (!latestResponse.ok || latest.revision !== result.revision || !customer || customer.source === 'demo' || customer.wechatId !== job.chatId || customer.humanTakeover === true || customers.filter(item => item.wechatId === job.chatId).length !== 1) throw new LocalError(409, '核对期间客户资料或人工状态已变化，未恢复托管。');
+    return { restored: true };
+  };
+  const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, ...(typeof adapter.sendManual === 'function' ? { sendManual: input => { assertCurrent(); return adapter.sendManual(input); } } : {}), generate, restoreManual, syncManualProtection: async config => { assertCurrent(); await adapter.syncConfig(config); } });
 
   async function pause() {
     runEpoch += 1; pollController?.abort();
@@ -157,6 +198,18 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           try { assertCurrent(); await engine.start(); } catch (error) { await adapter.pause(); throw error; }
           void poll().catch(() => {});
         } else if (route === '/pause') { empty(); await pause(); }
+        else if (route === '/manual-resume') {
+          if (!input || Array.isArray(input) || Object.keys(input).length !== 1 || typeof input.jobId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.jobId)) throw new LocalError(400, '恢复托管仅接收已发送的手动任务编号。');
+          const previous = await engine.getJob(input.jobId);
+          if (previous?.kind === 'manual' && previous.status === 'sent' && previous.autoResumeStatus === 'restored') { sendLocalJson(response, 200, { job: previous }); return true; }
+          const audit = await engine.manualResumeAudit(input.jobId);
+          const snapshotResponse = await requestLocalAPI(`${address.origin}/api/state`, { redirect: 'error', signal: AbortSignal.timeout(30_000), headers: localHeaders() });
+          const snapshot = await snapshotResponse.json();
+          assertCurrent();
+          if (!snapshotResponse.ok || !Number.isSafeInteger(snapshot?.revision) || snapshot.revision < 0) throw new LocalError(409, '客户资料版本无法核验，未恢复托管。');
+          const job = await engine.requestManualResume(input.jobId, { persistedRevision: snapshot.revision, conversationVersion: audit.conversationVersion, configRevision: audit.configRevision });
+          sendLocalJson(response, 200, { job }); return true;
+        }
         else if (route === '/manual') {
           if (!input || Array.isArray(input) || Object.keys(input).some(key => !['jobId', 'requestId', 'text'].includes(key)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.jobId || '') || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.requestId || '') || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 300 || !input.text.isWellFormed() || input.text.includes('\0') || Buffer.byteLength(input.text, 'utf8') > 1023) throw new LocalError(400, '手动回复仅接收原任务编号、唯一请求编号和300字以内的消息。');
           const source = await engine.getJob(input.jobId);
@@ -172,7 +225,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           if (existing && existing.status !== 'draft') { sendLocalJson(response, 200, { job: existing }); return true; }
           if (typeof adapter.sendManual !== 'function' || !(await adapter.status({ probe: true })).canManualSend) throw new LocalError(409, '单次手动发送尚未就绪，请先启用并核对原生后台发送组件。');
           assertCurrent();
-          const prepared = await engine.prepareManual({ ...input, text: input.text.trim() });
+          const prepared = await engine.prepareManual({ ...input, text: input.text.trim() }, { persistedRevision: saved.revision });
           // 人工接管保存在本地引擎，不改动页面经营资料的revision与自动接待开关。
           await adapter.syncConfig(await engine.getConfig());
           assertCurrent();
@@ -181,7 +234,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           sendLocalJson(response, 200, { job }); return true;
         }
         else if (route === '/followup') {
-          if (!input || Array.isArray(input) || Object.keys(input).some(key => key !== 'taskId') || typeof input.taskId !== 'string' || !input.taskId || input.taskId.length > 160 || /[\u0000-\u001f]/.test(input.taskId)) throw new LocalError(400, '一键跟进只接收已保存的任务编号。');
+          if (!input || Array.isArray(input) || Object.keys(input).some(key => !['taskId', 'expectedTextSha256'].includes(key)) || typeof input.taskId !== 'string' || !input.taskId || input.taskId.length > 160 || /[\u0000-\u001f]/.test(input.taskId) || input.expectedTextSha256 !== undefined && (typeof input.expectedTextSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(input.expectedTextSha256))) throw new LocalError(400, '一键跟进只接收已保存的任务编号和可选话术摘要。');
           const ticket = runEpoch;
           if (!(await engine.status()).running) throw new LocalError(409, '本地回复尚未运行，请在自动回复页核对规则后主动启动。');
           if (!(await adapter.status({ probe: true })).canSend) throw new LocalError(409, '本地发送组件尚未就绪，请先检查并启用。');
@@ -190,6 +243,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           assertCurrent();
           if (!preparedResponse.ok) throw new LocalError(preparedResponse.status, typeof prepared.error === 'string' ? prepared.error : '已保存的跟进任务尚不满足发送条件。');
           if (!prepared || Object.keys(prepared).some(key => !['taskId', 'customerId', 'text'].includes(key)) || prepared.taskId !== input.taskId || typeof prepared.customerId !== 'string' || !prepared.customerId || typeof prepared.text !== 'string' || !prepared.text.trim() || prepared.text.length > 300 || !prepared.text.isWellFormed() || prepared.text.includes('\0')) throw new LocalError(502, '已保存的跟进话术回执无法核验，未发送。');
+          if (input.expectedTextSha256 !== undefined && createHash('sha256').update(prepared.text, 'utf8').digest('hex') !== input.expectedTextSha256) throw new LocalError(409, '跟进话术已被其他页面修改，请重新预览后再发送。');
           if (ticket !== runEpoch || !(await engine.status()).running) throw new LocalError(409, '准备跟进期间接待已暂停或规则变化，未发送。');
           const followup = await engine.enqueueFollowup(prepared);
           assertCurrent();

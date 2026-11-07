@@ -7,6 +7,7 @@ import { configureToolEnvironment } from "./scripts/tool-environment.mjs";
 import { sites } from "./scripts/vite/sites-vite-plugin";
 import { connectorPreview } from "./scripts/vite/connector-preview-plugin.mjs";
 import localWechatPlugin from "./scripts/local-wechat/vite-plugin.mjs";
+import { localPort } from './scripts/local-wechat/local-port.mjs';
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -43,6 +44,7 @@ export default defineConfig(async ({ command }) => {
   configureToolEnvironment(process.cwd());
   // 仅本机开发运行注入内部传输凭证，构建产物和云端均不包含此凭证。
   const localMode = command === "serve" && !managedLinux && process.env.KEXU_LOCAL_WECHAT === "1";
+  const port = localPort();
   const modelBridgeToken = localMode ? randomBytes(32).toString("hex") : undefined;
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
@@ -51,7 +53,7 @@ export default defineConfig(async ({ command }) => {
   return {
     server: {
       ...(process.env.KEXU_LOCAL_WECHAT === "1"
-        ? { host: "127.0.0.1", port: 5173, strictPort: true }
+        ? { host: "127.0.0.1", port, strictPort: true }
         : {}),
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }
@@ -70,7 +72,7 @@ export default defineConfig(async ({ command }) => {
         inspectorPort: false,
         config: {
           ...localBindingConfig,
-          ...(localMode ? { vars: { KEXU_LOCAL_MODE: "1", KEXU_MODEL_BRIDGE_URL: "http://127.0.0.1:5173/__local-wechat/model-transport", KEXU_MODEL_BRIDGE_TOKEN: modelBridgeToken! } } : {}),
+          ...(localMode ? { vars: { KEXU_LOCAL_MODE: "1", KEXU_MODEL_BRIDGE_URL: `http://127.0.0.1:${port}/__local-wechat/model-transport`, KEXU_MODEL_BRIDGE_TOKEN: modelBridgeToken! } } : {}),
           ...(command === "serve"
             ? {
                 services: [

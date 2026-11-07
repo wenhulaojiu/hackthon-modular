@@ -239,6 +239,21 @@ export async function saveState(userId: string, state: AppState, revision: numbe
   return updated.revision;
 }
 
+export const manualResumeRequestSchema = z.object({ customerId: id, wechatId: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 1) }).strict();
+
+export async function resumeManualCustomer(userId: string, input: z.infer<typeof manualResumeRequestSchema>, workspace?: LocalWorkspace) {
+  if (!workspace || workspace.id === 'legacy') throw new ApiError(403, '恢复微信托管仅支持已绑定账号的本地版。');
+  const current = await loadState(userId, workspace);
+  if (current.revision !== input.expectedRevision) throw new ApiError(409, '客户资料已经变化，保留人工接管，请重新核对。');
+  const matches = current.state.customers.filter(customer => customer.id === input.customerId);
+  const customer = matches[0];
+  if (matches.length !== 1 || customer.source === 'demo' || customer.wechatId !== input.wechatId || current.state.customers.filter(item => item.wechatId === input.wechatId).length !== 1) throw new ApiError(409, '客户微信映射已变化，未恢复托管。');
+  if (!current.state.replySettings?.selectedCustomerIds.includes(customer.id) || customer.autoReplyEnabled !== true) throw new ApiError(409, '该客户尚未开启托管，保留当前设置。');
+  // 只清除当前客户的接管标记，不改变自动回复总开关、名单或经营资料。
+  const revision = customer.humanTakeover === true ? await saveState(userId, { ...current.state, customers: current.state.customers.map(item => item.id === customer.id ? { ...item, humanTakeover: false } : item) }, current.revision, workspace) : current.revision;
+  return { revision, customerId: customer.id, wechatId: customer.wechatId, humanTakeover: false as const };
+}
+
 export async function hasSavedKey(userId: string): Promise<boolean> {
   return !!(await getDb().select({ userId: userSecrets.userId }).from(userSecrets).where(eq(userSecrets.userId, userId)).get());
 }

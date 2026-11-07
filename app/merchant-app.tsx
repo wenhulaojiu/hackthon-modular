@@ -13,7 +13,7 @@ import AutoReply from './components/auto-reply';
 import Products from './components/products';
 import DataExport from './components/data-export';
 import {assertWorkspaceCurrent,captureWorkspace,getWorkspaceInvalidation,registerWorkspaceController,setWorkspaceToken,subscribeWorkspaceInvalidation,workspaceFetch,type WorkspaceSnapshot} from '../lib/client-workspace';
-import {mergeReplyEnrollment} from '../lib/reply-enrollment';
+import {mergeRuntimeEdit,mergeRuntimeRefresh} from '../lib/runtime-state-refresh';
 
 async function json(r:Response){return await r.json() as AIResult & {state:AppState;revision:number;hasApiKey:boolean;error?:string;workspaceToken?:string;code?:string};}
 const nav=[{id:'overview',text:'总览',icon:LayoutDashboard},{id:'customers',text:'客户档案',icon:Users},{id:'marketing',text:'客户跟进',icon:MessageCircle},{id:'inbox',text:'微信数据',icon:Upload},{id:'auto-reply',text:'自动回复',icon:Bot},{id:'products',text:'商品与服务',icon:Package},{id:'settings',text:'AI 与设置',icon:Settings2}] as const;
@@ -30,15 +30,16 @@ export default function MerchantApp({displayName}:{displayName:string}){
   useEffect(()=>{
     if(!workspace||window.location.protocol!=='http:'||!['127.0.0.1','localhost'].includes(window.location.hostname))return;
     const controller=new AbortController();let refreshing=false;
-    const timer=setInterval(()=>{if(refreshing||pendingSaves.current||blocked.current||!saved.current)return;refreshing=true;const base=saved.current,edit=edits.current;void (async()=>{try{
+    const refresh=()=>{if(refreshing||pendingSaves.current||blocked.current||!saved.current)return;refreshing=true;const base=saved.current,edit=edits.current;void (async()=>{try{
       const response=await workspaceFetch('/api/state',{signal:controller.signal,cache:'no-store'},workspace);const remote=await json(response);assertWorkspaceCurrent(workspace);
       if(!response.ok||controller.signal.aborted||pendingSaves.current||edits.current!==edit||saved.current!==base||remote.revision<=revision.current)return;
-      // 仅刷新自动建档的增量，其他窗口修改保持原有冲突提示，避免覆盖正在编辑的表单。
-      const merged=mergeReplyEnrollment(base,base,remote.state);if(!merged)return;
+      // 仅刷新自动建档或已确认恢复的接管标记，其他业务修改继续保持冲突提示。
+      const merged=mergeRuntimeRefresh(base,remote.state);if(!merged)return;
       for(const customer of merged.customers)if(!base.customers.some(old=>old.id===customer.id))enrolledCustomers.current.set(customer.id,customer);
       saved.current=remote.state;revision.current=remote.revision;setState(remote.state);
-    }catch{/* 后台刷新失败不影响已保存的客户和当前表单。 */}finally{refreshing=false}})()},5000);
-    return()=>{clearInterval(timer);controller.abort()};
+    }catch{/* 后台刷新失败不影响已保存的客户和当前表单。 */}finally{refreshing=false}})()};
+    const timer=setInterval(refresh,5000);window.addEventListener('kexu-runtime-state-updated',refresh);
+    return()=>{clearInterval(timer);window.removeEventListener('kexu-runtime-state-updated',refresh);controller.abort()};
   },[workspace]);
   function currentWorkspace(){if(!workspace)throw Error('工作空间尚未加载');assertWorkspaceCurrent(workspace);return workspace}
   function onChange(next:AppState,options?:{clearBusinessData?:boolean}){
@@ -58,7 +59,7 @@ export default function MerchantApp({displayName}:{displayName:string}){
         if(r.ok){revision.current=d.revision;saved.current=candidate;if(options?.clearBusinessData)enrolledCustomers.current.clear();else for(const id of enrolledCustomers.current.keys())if(baseAtEdit?.customers.some(customer=>customer.id===id)&&!candidate.customers.some(customer=>customer.id===id))enrolledCustomers.current.delete(id);if(edit===edits.current){setState(candidate);setSaveStatus('已保存')}return}
         if(r.status!==409||!base||attempt===2)throw Error(d.error||'保存失败');
         const latestResponse=await workspaceFetch('/api/state',{cache:'no-store'},expected),latest=await json(latestResponse);assertWorkspaceCurrent(expected);
-        const merged=latestResponse.ok?mergeReplyEnrollment(base,candidate,latest.state):null;if(!merged)throw Error(d.error||'保存冲突');
+        const merged=latestResponse.ok?mergeRuntimeEdit(base,candidate,latest.state):null;if(!merged)throw Error(d.error||'保存冲突');
         for(const customer of latest.state.customers)if(!base.customers.some(old=>old.id===customer.id))enrolledCustomers.current.set(customer.id,customer);
         candidate=options?.clearBusinessData?{...merged,customers:[],orders:[],tasks:[],imports:[],exports:[],replySettings:merged.replySettings?{...merged.replySettings,enabled:false,selectedCustomerIds:[]}:undefined}:merged;base=latest.state;revision.current=latest.revision;
       }

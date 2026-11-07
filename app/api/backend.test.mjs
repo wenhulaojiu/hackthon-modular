@@ -68,6 +68,7 @@ function fixture(bindings = {}) {
     aiRoute: load("app/api/ai/route.ts"),
     replyRoute: load("app/api/reply/route.ts"),
     enrollRoute: load("app/api/reply/enroll/route.ts"),
+    manualResumeRoute: load("app/api/reply/manual-resume/route.ts"),
     asUser: (user, work) => identity.run(user, work),
     close: () => sqlite.close(),
   };
@@ -688,6 +689,83 @@ function workspaceHeaders(id = "legacy", revision = 1, expected = `${id}@${revis
 }
 
 function getStateRequest(headers = {}) { return new Request(`${origin}/api/state`, { headers }); }
+
+async function manualResumeFixture(f) {
+  const legacy = await f.server.loadState("alice"), scope = { id: accountA, revision: 2 };
+  const loaded = await f.server.loadState("alice", scope);
+  const customer = { ...structuredClone(legacy.state.customers[0]), id: "resume-customer", name: "合成接管客户", source: "wechat", wechatId: "wxid_resume_fixture", autoReplyEnabled: true, humanTakeover: true, messages: [] };
+  loaded.state.customers = [customer, { ...structuredClone(customer), id: "untouched-customer", wechatId: "wxid_untouched_fixture", note: "其他客户资料" }];
+  loaded.state.replySettings = { enabled: false, mode: "review", selectedCustomerIds: loaded.state.customers.map(item => item.id), businessHours: { enabled: false, start: "09:00", end: "18:00", days: [1] }, faq: [], handoffKeywords: ["转人工"], maxReplyChars: 300, cooldownSeconds: 30, debounceSeconds: 10, prompt: "保留规则" };
+  const revision = await f.server.saveState("alice", loaded.state, loaded.revision, scope);
+  return { scope, headers: { ...workspaceHeaders(accountA, 2), "x-kexu-local": "1" }, body: { customerId: customer.id, wechatId: customer.wechatId, expectedRevision: revision } };
+}
+
+test("人工恢复接口只清除当前客户接管，CAS保存且重复恢复不增加版本", async () => {
+  const f = fixture(localBindings);
+  try {
+    const input = await manualResumeFixture(f), before = await f.server.loadState("alice", input.scope);
+    const legacyBefore = await f.server.loadState("alice");
+    const response = await f.asUser("alice", () => f.manualResumeRoute.POST(post("reply/manual-resume", input.body, input.headers)));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { revision: before.revision + 1, customerId: input.body.customerId, wechatId: input.body.wechatId, humanTakeover: false });
+    const saved = await f.server.loadState("alice", input.scope), expected = structuredClone(before.state);
+    expected.customers[0].humanTakeover = false;
+    assert.deepEqual(saved.state, expected);
+    assert.deepEqual(await f.server.loadState("alice"), legacyBefore);
+    const repeated = await f.asUser("alice", () => f.manualResumeRoute.POST(post("reply/manual-resume", { ...input.body, expectedRevision: saved.revision }, input.headers)));
+    assert.equal(repeated.status, 200);
+    assert.equal((await repeated.json()).revision, saved.revision);
+    assert.deepEqual(await f.server.loadState("alice", input.scope), saved);
+  } finally { f.close(); }
+});
+
+test("人工恢复接口拒绝云端、未绑定账号、跨源、过期工作区和缺少本机标识", async () => {
+  const cloud = fixture();
+  try {
+    const response = await cloud.asUser("alice", () => cloud.manualResumeRoute.POST(post("reply/manual-resume", { customerId: "resume-customer", wechatId: "wxid_resume_fixture", expectedRevision: 0 }, { ...workspaceHeaders(accountA), "x-kexu-local": "1" })));
+    assert.equal(response.status, 403);
+    assert.equal(cloud.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 0);
+  } finally { cloud.close(); }
+  const f = fixture(localBindings);
+  try {
+    const input = await manualResumeFixture(f), before = await f.server.loadState("alice", input.scope);
+    const cases = [
+      [{ ...workspaceHeaders(), "x-kexu-local": "1" }, 403],
+      [{ ...input.headers, origin: "https://elsewhere.invalid" }, 403],
+      [{ ...workspaceHeaders(accountA, 2, `${accountA}@1`), "x-kexu-local": "1" }, 409],
+      [{ ...workspaceHeaders(accountB, 2, `${accountA}@2`), "x-kexu-local": "1" }, 409],
+      [workspaceHeaders(accountA, 2), 403],
+    ];
+    for (const [headers, status] of cases) assert.equal((await f.asUser("alice", () => f.manualResumeRoute.POST(post("reply/manual-resume", input.body, headers)))).status, status);
+    assert.equal((await f.manualResumeRoute.POST(post("reply/manual-resume", input.body, input.headers))).status, 401);
+    assert.deepEqual(await f.server.loadState("alice", input.scope), before);
+  } finally { f.close(); }
+});
+
+test("人工恢复接口拒绝旧数据版本、演示客户、停用、未选择及变更后的微信映射", async () => {
+  const cases = [
+    ["旧数据版本", () => {}, body => { body.expectedRevision -= 1; }],
+    ["演示客户", state => { state.customers[0].source = "demo"; }],
+    ["未启用客户", state => { state.customers[0].autoReplyEnabled = false; }],
+    ["未选择客户", state => { state.replySettings.selectedCustomerIds = ["untouched-customer"]; }],
+    ["微信号已变更", state => { state.customers[0].wechatId = "wxid_changed_fixture"; }],
+    ["微信号重复", state => { state.customers[1].wechatId = state.customers[0].wechatId; }],
+    ["客户已移除", state => { state.customers.shift(); state.replySettings.selectedCustomerIds = ["untouched-customer"]; }],
+  ];
+  for (const [label, changeState, changeBody] of cases) {
+    const f = fixture(localBindings);
+    try {
+      const input = await manualResumeFixture(f), current = await f.server.loadState("alice", input.scope);
+      changeState(current.state);
+      input.body.expectedRevision = await f.server.saveState("alice", current.state, current.revision, input.scope);
+      changeBody?.(input.body);
+      const before = await f.server.loadState("alice", input.scope);
+      const response = await f.asUser("alice", () => f.manualResumeRoute.POST(post("reply/manual-resume", input.body, input.headers)));
+      assert.equal(response.status, 409, label);
+      assert.deepEqual(await f.server.loadState("alice", input.scope), before, label);
+    } finally { f.close(); }
+  }
+});
 
 test("云端忽略伪造的本地账号范围和期望令牌，维持原有数据及API协议", async () => {
   const f = fixture();

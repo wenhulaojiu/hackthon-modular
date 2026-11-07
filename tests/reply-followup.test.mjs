@@ -109,7 +109,11 @@ test('getJob可查询超过状态列表200条的已提交任务，旧队列缺�
   const original = stored.jobs[0];
   for (let index = 0; index < 205; index++) stored.jobs.push({ ...original, id: `filler-${index}`, kind: 'reply', status: 'ignored', taskId: undefined });
   await writeFile(f.filename, JSON.stringify(stored), 'utf8'); const reopened = await f.create();
-  assert.ok(!(await reopened.status()).jobs.some(job => job.id === queued.jobId));
+  const snapshot = await reopened.status();
+  assert.ok(!snapshot.jobs.some(job => job.id === queued.jobId));
+  assert.equal(snapshot.jobs.length, 200);
+  assert.deepEqual(snapshot.submittedFollowups, [{ taskId: 'task-1', jobId: queued.jobId }]);
+  assert.deepEqual(Object.keys(snapshot.submittedFollowups[0]).sort(), ['jobId', 'taskId']);
   assert.equal((await reopened.getJob(queued.jobId)).taskId, 'task-1'); assert.equal(await reopened.getJob('missing-job'), null);
   await reopened.start(); assert.equal((await reopened.enqueueFollowup(request())).duplicate, true);
 });

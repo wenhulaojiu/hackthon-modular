@@ -1,6 +1,6 @@
 import type { ReplyJobView } from '../../lib/types.ts';
 
-export type ManualAttempt = { sourceJobId: string; requestId: string; text: string; jobId?: string; status: 'submitted' | 'sent' | 'failed' | 'unknown' };
+export type ManualAttempt = { sourceJobId: string; requestId: string; text: string; jobId?: string; status: 'submitted' | 'restoring' | 'sent' | 'failed' | 'unknown' };
 export type ManualReplyRecord = { attempt: ManualAttempt | null; blockedTexts: string[] };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,7 +17,7 @@ export function parseManualReplyRecord(raw: string | null, sourceJobId: string):
     const value = JSON.parse(raw);
     const attempt = value?.attempt;
     if (!Array.isArray(value?.blockedTexts) || value.blockedTexts.length > 20 || value.blockedTexts.some((text: unknown) => typeof text !== 'string' || manualReplyError(text))) return empty;
-    if (attempt && (attempt.sourceJobId !== sourceJobId || !uuid.test(attempt.requestId) || typeof attempt.text !== 'string' || manualReplyError(attempt.text) || !['submitted', 'sent', 'failed', 'unknown'].includes(attempt.status) || attempt.jobId !== undefined && !uuid.test(attempt.jobId))) return empty;
+    if (attempt && (attempt.sourceJobId !== sourceJobId || !uuid.test(attempt.requestId) || typeof attempt.text !== 'string' || manualReplyError(attempt.text) || !['submitted', 'restoring', 'sent', 'failed', 'unknown'].includes(attempt.status) || attempt.jobId !== undefined && !uuid.test(attempt.jobId))) return empty;
     return { attempt: attempt || null, blockedTexts: value.blockedTexts };
   } catch { return empty; }
 }
@@ -39,7 +39,17 @@ export function assertManualReceipt(job: ReplyJobView, source: ReplyJobView, att
   if (!job || !uuid.test(job.id) || job.kind !== 'manual' || job.sourceJobId !== source.id || job.customerId !== source.customerId || job.chatId !== source.chatId || job.reply !== attempt.text || job.requestId !== attempt.requestId || attempt.jobId && job.id !== attempt.jobId || job.status === 'sent' && !job.sendMessageId?.trim()) throw new Error('手动回复回执不匹配，请核对本机发送记录。');
 }
 
-export const manualReplyTerminal = (job: ReplyJobView) => ['sent', 'failed', 'unknown', 'handoff', 'cancelled', 'ignored'].includes(job.status);
+export const manualAutoResumeConfirmed = (job: ReplyJobView) => job.kind === 'manual' && job.status === 'sent' && !!job.sendMessageId?.trim() && job.autoResumeStatus === 'restored';
+
+// 源卡片只在后端完成恢复，并且可找到对应发送凭证时移出待处理列表。
+export function replyJobResolved(job: ReplyJobView, jobs: ReplyJobView[]): boolean {
+  return job.kind !== 'manual' && !!job.resolvedAt && Number.isFinite(Date.parse(job.resolvedAt)) && uuid.test(job.resolvedByManualJobId || '') && jobs.some(manual => manual.id === job.resolvedByManualJobId && manual.sourceJobId === job.id && manual.customerId === job.customerId && manual.chatId === job.chatId && manualAutoResumeConfirmed(manual));
+}
+
+export const replyQueueJobs = (jobs: ReplyJobView[]) => jobs.filter(job => job.kind !== 'manual' && ['draft', 'handoff', 'unknown', 'failed', 'queued', 'generating', 'ready', 'sending'].includes(job.status) && !replyJobResolved(job, jobs));
+
+// 微信发送已核实时仍需等待托管恢复结果；只查询同一请求，不再提交正文。
+export const manualReplyTerminal = (job: ReplyJobView) => job.status === 'sent' ? job.autoResumeStatus !== 'pending' : ['failed', 'unknown', 'handoff', 'cancelled', 'ignored'].includes(job.status);
 
 function waitForPoll(signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

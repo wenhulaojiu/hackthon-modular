@@ -5,8 +5,9 @@ import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createLogger, ensureRuntime, exists, localRoot, projectRoot, readJson, runLogged, writeJsonAtomic } from './setup.mjs';
+import { localPort } from './local-port.mjs';
 
-const port = 5173;
+const port = localPort();
 const origin = `http://127.0.0.1:${port}`;
 const token = randomUUID();
 const lockFile = path.join(localRoot, 'launch.lock');

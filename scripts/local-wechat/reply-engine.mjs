@@ -88,7 +88,7 @@ export async function createReplyEngine(options = {}) {
   const generate = options.generate;
   const send = options.send;
   const sendManual = options.sendManual;
-  let state = { version: 1, config: null, configRevision: 0, jobs: [], seen: [], takeovers: [], history: {}, lastSent: {}, welcomeOnce: {}, followupOnce: {}, manualOnce: {} };
+  let state = { version: 1, config: null, configRevision: 0, jobs: [], seen: [], takeovers: [], history: {}, lastSent: {}, welcomeOnce: {}, followupOnce: {}, manualOnce: {}, conversationVersions: {} };
   let hasFile = false;
   let armed = false;
   let closed = false;
@@ -109,6 +109,8 @@ export async function createReplyEngine(options = {}) {
     if (loaded.welcomeOnce === undefined) loaded.welcomeOnce = {};
     if (loaded.followupOnce === undefined) loaded.followupOnce = {};
     if (loaded.manualOnce === undefined) loaded.manualOnce = {};
+    if (loaded.conversationVersions === undefined) loaded.conversationVersions = {};
+    if (!loaded.conversationVersions || Array.isArray(loaded.conversationVersions) || typeof loaded.conversationVersions !== "object" || Object.keys(loaded.conversationVersions).length > 5000 || Object.entries(loaded.conversationVersions).some(([id, value]) => !safeId(id) || !Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER)) fail("会话保护版本异常，原数据未被覆盖。", 503);
     if (!loaded.welcomeOnce || Array.isArray(loaded.welcomeOnce) || typeof loaded.welcomeOnce !== "object" || Object.keys(loaded.welcomeOnce).length > 500 || Object.entries(loaded.welcomeOnce).some(([chatId, record]) => !isEnrollmentChatId(chatId) || !record || !safeId(record.customerId) || !validDate(record.enrolledAt) || !["eligible", "queued", "skipped"].includes(record.state) || record.state === "queued" && (!safeId(record.jobId) || !safeId(record.eventId) || !validDate(record.date)))) fail("首次店铺介绍的防重记录异常，原数据未被覆盖。", 503);
     if (!loaded.followupOnce || Array.isArray(loaded.followupOnce) || typeof loaded.followupOnce !== "object" || Object.keys(loaded.followupOnce).length > 5000 || Object.entries(loaded.followupOnce).some(([taskId, record]) => !safeId(taskId) || !record || !safeId(record.jobId) || !safeId(record.customerId) || !/^[a-f0-9]{64}$/.test(record.textSha256))) fail("主动跟进防重记录异常，原数据未被覆盖。", 503);
     if (!loaded.manualOnce || Array.isArray(loaded.manualOnce) || typeof loaded.manualOnce !== "object" || Object.keys(loaded.manualOnce).length > 5000 || Object.entries(loaded.manualOnce).some(([requestId, record]) => !UUID.test(requestId) || !record || !safeId(record.jobId) || !safeId(record.sourceJobId) || !safeId(record.customerId) || !isEnrollmentChatId(record.chatId) || !/^[a-f0-9]{64}$/.test(record.textSha256))) fail("手动回复防重记录异常，原数据未被覆盖。", 503);
@@ -171,6 +173,9 @@ export async function createReplyEngine(options = {}) {
         next.followupOnce = { ...next.followupOnce, [job.taskId]: { jobId: job.id, customerId: job.customerId, textSha256: createHash("sha256").update(job.reply, "utf8").digest("hex") } };
       }
       if (job.kind === "manual") {
+        if (["failed", "unknown", "handoff"].includes(job.status)) { job.autoResumeStatus = "blocked"; job.autoResumeReason = "发送尚未核实成功，继续保留人工处理。"; }
+        // 旧成功记录不具备本次恢复保护凭据，不能在升级或重启时顺带释放人工接管。
+        if (job.status === "sent" && job.autoResumeStatus !== "restored") { job.autoResumeStatus = "blocked"; job.autoResumeReason = "旧记录或重启前的恢复尚未核实，请人工核对托管状态。"; }
         const record = { jobId: job.id, sourceJobId: job.sourceJobId, customerId: job.customerId, chatId: job.chatId, textSha256: createHash("sha256").update(job.reply, "utf8").digest("hex") };
         if (Object.hasOwn(next.manualOnce, job.requestId) && JSON.stringify(next.manualOnce[job.requestId]) !== JSON.stringify(record)) fail("手动回复任务与防重记录不一致，原队列未被覆盖。", 503);
         if (!Object.hasOwn(next.manualOnce, job.requestId)) {
@@ -188,6 +193,12 @@ export async function createReplyEngine(options = {}) {
   });
 
   function customerFor(next, job) { return next.config?.customers.find((customer) => customer.id === job.customerId && customer.wechatId === job.chatId); }
+  function bumpConversation(next, customerId) {
+    const previous = Object.hasOwn(next.conversationVersions, customerId) ? next.conversationVersions[customerId] : 0;
+    if (!Number.isSafeInteger(previous) || previous >= Number.MAX_SAFE_INTEGER - 1 || !Object.hasOwn(next.conversationVersions, customerId) && Object.keys(next.conversationVersions).length >= 5000) fail("会话保护版本容量已满，未释放人工接管。", 503);
+    next.conversationVersions = { ...next.conversationVersions, [customerId]: previous + 1 };
+    return previous + 1;
+  }
   function gate(next, job, checkCooldown = true) {
     const config = next.config;
     if (!config?.settings.enabled) return { action: "ignored", reason: "全局自动回复尚未启用。" };
@@ -215,17 +226,18 @@ export async function createReplyEngine(options = {}) {
     generationControllers.get(job.leaseId)?.abort();
     job.status = status; job.reason = reason; job.updatedAt = iso();
     delete job.leaseId;
-    if (lockConversation && !next.takeovers.includes(job.customerId)) next.takeovers.push(job.customerId);
+    if (job.kind === "manual") { job.autoResumeStatus = "blocked"; job.autoResumeReason = "发送尚未核实成功，继续保留人工处理。"; }
+    if (lockConversation) { bumpConversation(next, job.customerId); if (!next.takeovers.includes(job.customerId)) next.takeovers.push(job.customerId); }
   }
 
   function publicJob(job) {
-    return { id: job.id, kind: job.kind || "reply", ...(job.kind === "followup" ? { taskId: job.taskId } : {}), ...(job.kind === "manual" ? { sourceJobId: job.sourceJobId, requestId: job.requestId } : {}), customerId: job.customerId, chatId: job.chatId, message: copy(job.message), messages: copy(job.messages || [job.message]), ...(job.quietUntil !== undefined ? { quietUntil: new Date(job.quietUntil).toISOString() } : {}), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
+    return { id: job.id, kind: job.kind || "reply", ...(job.kind === "followup" ? { taskId: job.taskId } : {}), ...(job.kind === "manual" ? { sourceJobId: job.sourceJobId, requestId: job.requestId, ...(job.autoResumeStatus ? { autoResumeStatus: job.autoResumeStatus } : {}), ...(job.autoResumeReason ? { autoResumeReason: job.autoResumeReason } : {}) } : {}), ...(job.resolvedAt ? { resolvedAt: job.resolvedAt, resolvedByManualJobId: job.resolvedByManualJobId } : {}), customerId: job.customerId, chatId: job.chatId, message: copy(job.message), messages: copy(job.messages || [job.message]), ...(job.quietUntil !== undefined ? { quietUntil: new Date(job.quietUntil).toISOString() } : {}), status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt, ...(job.reply ? { reply: job.reply } : {}), ...(job.reason ? { reason: job.reason } : {}), ...(job.sendMessageId ? { sendMessageId: job.sendMessageId } : {}) };
   }
 
   async function status() {
     await chain;
-    const counts = Object.fromEntries(STATUSES.map((name) => [name, state.jobs.filter((job) => job.status === name).length]));
-    return { running: armed && !closed, generatorMode: typeof generate === "function" ? "background" : "browser", configReady: !!state.config, counts, jobs: state.jobs.slice(-200).reverse().map(publicJob), takeovers: [...state.takeovers], pausedReason: armed ? undefined : pausedReason };
+    const counts = Object.fromEntries(STATUSES.map((name) => [name, state.jobs.filter((job) => job.status === name && !job.resolvedAt).length]));
+    return { running: armed && !closed, generatorMode: typeof generate === "function" ? "background" : "browser", configReady: !!state.config, counts, jobs: state.jobs.slice(-200).reverse().map(publicJob), submittedFollowups: Object.entries(state.followupOnce).map(([taskId, record]) => ({ taskId, jobId: record.jobId })), takeovers: [...state.takeovers], pausedReason: armed ? undefined : pausedReason };
   }
 
   function schedule() {
@@ -385,8 +397,10 @@ export async function createReplyEngine(options = {}) {
           // 严格发送回执已确认的正文立即进入对话上下文，不等待下一轮导出回声。
           history.push({ id: result.messageId, nativeMessageId: result.messageId, sender: "merchant", text: job.reply, date: validDate(job.sendStartedAt) ? job.sendStartedAt : iso() });
           next.history[job.chatId] = history.slice(-100);
+          if (job.kind === "manual") { job.autoResumeStatus = "pending"; job.autoResumeReason = "消息已核实发送，正在核对托管恢复条件。"; }
         } else setHandoff(next, job, result?.status === "failed" ? "适配器确认未发送成功，请人工处理，不会自动重试。" : "发送结果未知，请核对微信实际记录，禁止自动重发。", result?.status === "failed" ? "failed" : "unknown");
       });
+      if (packet.manual && state.jobs.find(job => job.id === packet.jobId)?.status === "sent") await resumeManualJob(packet.jobId);
       return true;
     } finally { sendBusy = false; }
   }
@@ -545,11 +559,13 @@ export async function createReplyEngine(options = {}) {
       if (event.sender === "merchant") {
         const ownEcho = next.jobs.some((job) => job.chatId === event.chatId && ["sending", "sent"].includes(job.status) && job.reply === event.text && (safeId(event.nativeMessageId) ? event.nativeMessageId === job.sendMessageId : now() - Date.parse(job.sendStartedAt || job.updatedAt) < 120_000));
         if (event.automated !== true && !ownEcho) {
+          bumpConversation(next, customer.id);
           if (!next.takeovers.includes(customer.id)) next.takeovers.push(customer.id);
           for (const pending of next.jobs) if (pending.chatId === event.chatId && PENDING.has(pending.status) && pending.status !== "sending") setHandoff(next, pending, "检测到商户人工回复，已停止该会话的待发送回复。");
         }
         return { accepted: false, reason: ownEcho || event.automated ? "已忽略自动发送回声。" : "检测到商户人工回复，已转人工接管。" };
       }
+      bumpConversation(next, customer.id);
       const welcome = next.jobs.find(job => job.kind === "welcome" && job.chatId === event.chatId && RECENT_WELCOME_STATES.has(job.status));
       const welcomeAge = welcome ? now() - Date.parse(welcome.sendStartedAt || welcome.createdAt) : Infinity;
       const needsHandoff = SENSITIVE.test(event.text) || next.config.settings.handoffKeywords.some(word => event.text.toLowerCase().includes(word.toLowerCase()));
@@ -590,7 +606,7 @@ export async function createReplyEngine(options = {}) {
     return null;
   }
 
-  async function prepareManual(input) {
+  async function prepareManual(input, resumeSnapshot = {}) {
     if (!input || Array.isArray(input) || Object.keys(input).some(key => !["jobId", "requestId", "text"].includes(key)) || !UUID.test(input.jobId || "") || !UUID.test(input.requestId || "") || !text(input.text, 300) || !input.text.isWellFormed() || input.text.includes("\0") || Buffer.byteLength(input.text, "utf8") > 1023) fail("手动回复需要原任务编号、唯一请求编号及300字以内的消息。");
     const manualText = input.text.trim();
     const digest = createHash("sha256").update(manualText, "utf8").digest("hex");
@@ -613,12 +629,13 @@ export async function createReplyEngine(options = {}) {
       const customer = customerFor(next, source);
       customer.humanTakeover = true;
       if (!next.takeovers.includes(source.customerId)) next.takeovers.push(source.customerId);
+      const conversationVersion = bumpConversation(next, source.customerId);
       // 人工明确接待后取消尚未发送的自动内容，已核实的历史和发送结果保持原样。
       for (const pending of next.jobs) if (pending.chatId === source.chatId && pending.kind !== "manual" && PENDING.has(pending.status)) {
         generationControllers.get(pending.leaseId)?.abort();
-        pending.status = "cancelled"; pending.reason = "商家已开始手动回复，已取消本条自动发送。"; pending.updatedAt = iso(); delete pending.leaseId; delete pending.leaseUntil;
+        pending.status = pending === source ? "handoff" : "cancelled"; pending.reason = "商家已开始手动回复，已停止本条自动发送，等待手动发送核实。"; pending.updatedAt = iso(); delete pending.leaseId; delete pending.leaseUntil;
       }
-      const job = { id: randomUUID(), kind: "manual", sourceJobId: source.id, requestId: input.requestId, customerId: source.customerId, chatId: source.chatId, message: copy(source.message), messages: copy(source.messages || [source.message]), reply: manualText, status: "draft", quietUntil: now(), createdAt: iso(), updatedAt: iso(), reason: "手动回复已保存，等待本机核验客户与单次发送授权。" };
+      const job = { id: randomUUID(), kind: "manual", sourceJobId: source.id, requestId: input.requestId, customerId: source.customerId, chatId: source.chatId, message: copy(source.message), messages: copy(source.messages || [source.message]), reply: manualText, status: "draft", quietUntil: now(), createdAt: iso(), updatedAt: iso(), reason: "手动回复已保存，等待本机核验客户与单次发送授权。", autoResumeStatus: "pending", autoResumeReason: "发送核实成功后才会恢复托管并完成原问题。", autoResumeGuard: { conversationVersion, configRevision: next.configRevision, ...(Number.isSafeInteger(resumeSnapshot.persistedRevision) && resumeSnapshot.persistedRevision >= 0 ? { persistedRevision: resumeSnapshot.persistedRevision } : {}) } };
       next.jobs.push(job);
       next.manualOnce[input.requestId] = { jobId: job.id, sourceJobId: source.id, customerId: source.customerId, chatId: source.chatId, textSha256: digest };
       return { duplicate: false, job: publicJob(job) };
@@ -647,6 +664,85 @@ export async function createReplyEngine(options = {}) {
     const job = state.jobs.find(item => item.id === record.jobId);
     if (!job) fail("手动回复防重记录存在但任务缺失，请核对微信，不能重发。", 409);
     return publicJob(job);
+  }
+
+  function manualResumeBlock(next, job, { ignoreGuard = false } = {}) {
+    if (!job || job.kind !== "manual" || job.status !== "sent" || !/^[0-9]{1,40}$/.test(job.sendMessageId || "") || !/[1-9]/.test(job.sendMessageId)) return "手动消息尚无可核实的成功回执，继续保留人工处理。";
+    const source = next.jobs.find(item => item.id === job.sourceJobId);
+    const record = Object.hasOwn(next.manualOnce, job.requestId) ? next.manualOnce[job.requestId] : null;
+    if (!source || source.customerId !== job.customerId || source.chatId !== job.chatId || !record || record.jobId !== job.id || record.sourceJobId !== source.id || record.customerId !== job.customerId || record.chatId !== job.chatId || record.textSha256 !== createHash("sha256").update(job.reply, "utf8").digest("hex")) return "原问题、手动请求与发送记录无法完整对应，未自动恢复。";
+    if (source.resolvedAt && source.resolvedByManualJobId !== job.id) return "原问题已由另一条手动回复处理，请核对历史。";
+    const mapped = manualGate(next, job);
+    if (mapped) return mapped.reason;
+    if (next.jobs.some(item => item.id !== job.id && item.id !== source.id && item.chatId === job.chatId && (PENDING.has(item.status) || item.status === "unknown"))) return "该客户还有待处理或结果不明的发送，继续保留人工处理。";
+    if (!ignoreGuard) {
+      const guard = job.autoResumeGuard;
+      if (!guard || !Number.isSafeInteger(guard.persistedRevision) || guard.persistedRevision < 0) return "旧记录缺少本次恢复凭据，请核对后点击恢复托管并完成。";
+      if (guard.configRevision !== next.configRevision) return "手动发送期间接待规则发生变化，继续保留人工处理。";
+      if (guard.conversationVersion !== (next.conversationVersions[job.customerId] || 0)) return "手动发送期间出现新消息或人工操作，继续保留人工处理。";
+    }
+    return "";
+  }
+
+  async function resumeManualJob(jobId) {
+    const candidate = await mutate(next => {
+      const job = next.jobs.find(item => item.id === jobId);
+      if (closed) return null;
+      if (job?.autoResumeStatus === "restored") return null;
+      const blocked = manualResumeBlock(next, job);
+      if (blocked || typeof options.restoreManual !== "function") {
+        if (job?.kind === "manual") { job.autoResumeStatus = "blocked"; job.autoResumeReason = blocked || "持久客户资料恢复接口尚未就绪，继续保留人工处理。"; }
+        return null;
+      }
+      job.autoResumeStatus = "pending"; job.autoResumeReason = "消息已发送，正在核对客户资料并恢复托管。";
+      const config = copy(next.config);
+      config.customers.find(customer => customer.id === job.customerId).humanTakeover = false;
+      const echoes = next.jobs.filter(item => item.chatId === job.chatId && item.status === "sent" && /^[0-9]{1,40}$/.test(item.sendMessageId || "")).map(item => ({ messageId: item.sendMessageId, text: item.reply }));
+      return { job: copy(job), config, expectedRevision: job.autoResumeGuard.persistedRevision, echoes };
+    });
+    if (!candidate) return;
+    let restored;
+    try { restored = await options.restoreManual(candidate); }
+    catch (error) { restored = { restored: false, reason: text(error?.message, 800) ? error.message : "托管恢复未核实，继续保留人工处理。" }; }
+    const committed = await mutate(next => {
+      const job = next.jobs.find(item => item.id === jobId);
+      if (!job) return false;
+      const blocked = closed ? "服务已关闭，托管恢复未核实。" : manualResumeBlock(next, job);
+      if (blocked || restored?.restored !== true) { job.autoResumeStatus = "blocked"; job.autoResumeReason = blocked || (text(restored?.reason, 800) ? restored.reason : "托管恢复未核实，继续保留人工处理。"); return false; }
+      customerFor(next, job).humanTakeover = false;
+      next.takeovers = next.takeovers.filter(id => id !== job.customerId);
+      const source = next.jobs.find(item => item.id === job.sourceJobId);
+      source.resolvedAt = iso(); source.resolvedByManualJobId = job.id;
+      job.autoResumeStatus = "restored"; job.autoResumeReason = "本条已处理，客户托管已恢复；自动接待仍按当前开关和运行状态执行。";
+      return true;
+    });
+    if (!committed && typeof options.syncManualProtection === "function") { try { await options.syncManualProtection(copy(state.config)); } catch { /* 保持本地人工锁，不把同步失败伪装成已恢复。 */ } }
+    schedule();
+  }
+
+  async function manualResumeAudit(jobId) {
+    await chain;
+    const job = state.jobs.find(item => item.id === jobId);
+    const blocked = manualResumeBlock(state, job, { ignoreGuard: true });
+    if (blocked) fail(blocked, 409);
+    return { job: copy(job), conversationVersion: state.conversationVersions[job.customerId] || 0, configRevision: state.configRevision };
+  }
+
+  async function requestManualResume(jobId, snapshot) {
+    await mutate(next => {
+      if (closed) fail("本地回复引擎已关闭。", 503);
+      const job = next.jobs.find(item => item.id === jobId);
+      if (job?.autoResumeStatus === "restored") return;
+      const blocked = manualResumeBlock(next, job, { ignoreGuard: true });
+      if (blocked) fail(blocked, 409);
+      const currentVersion = next.conversationVersions[job.customerId] || 0;
+      if (!Number.isSafeInteger(snapshot?.persistedRevision) || snapshot.persistedRevision < 0 || snapshot.conversationVersion !== currentVersion || snapshot.configRevision !== next.configRevision) fail("核对期间会话、人工操作或规则已变化，未恢复托管。", 409);
+      if (job.autoResumeGuard ? job.autoResumeGuard.conversationVersion !== currentVersion : currentVersion !== 0) fail("该手动回复之后存在新消息或人工操作，请先处理新的问题。", 409);
+      job.autoResumeGuard = { conversationVersion: currentVersion, configRevision: next.configRevision, persistedRevision: snapshot.persistedRevision };
+      job.autoResumeStatus = "pending"; job.autoResumeReason = "正在核对已发送记录并恢复托管，不会再次发送消息。";
+    });
+    await resumeManualJob(jobId);
+    return getJob(jobId);
   }
 
   async function claimWork() { if (typeof generate === "function") return { jobs: [] }; return { jobs: await reserveWork() }; }
@@ -679,6 +775,7 @@ export async function createReplyEngine(options = {}) {
     await mutate((next) => {
       const customer = next.config?.customers.find((item) => item.id === input.customerId);
       if (!customer) fail("未找到此客户。", 404);
+      bumpConversation(next, customer.id);
       customer.humanTakeover = input.enabled;
       next.takeovers = next.takeovers.filter((id) => id !== input.customerId);
       if (input.enabled) {
@@ -702,5 +799,5 @@ export async function createReplyEngine(options = {}) {
 
   async function getConfig() { await chain; return copy(state.config); }
   async function getJob(jobId) { if (!safeId(jobId)) fail("跟进任务编号不正确。"); await chain; const job = state.jobs.find(item => item.id === jobId); return job ? publicJob(job) : null; }
-  return { syncConfig, enrollCustomers, enqueueWelcome, enqueueFollowup, prepareManual, dispatchManual, getManualRequest, getConfig, getJob, start, pause, ingest, status, claimWork, completeWork, approve, reject, takeover, close };
+  return { syncConfig, enrollCustomers, enqueueWelcome, enqueueFollowup, prepareManual, dispatchManual, getManualRequest, manualResumeAudit, requestManualResume, getConfig, getJob, start, pause, ingest, status, claimWork, completeWork, approve, reject, takeover, close };
 }

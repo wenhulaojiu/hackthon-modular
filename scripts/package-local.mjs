@@ -6,7 +6,7 @@ import { deflateRawSync } from 'node:zlib';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'public', 'kexu-local.zip');
 const folders = ['app', 'components', 'db', 'drizzle', 'hooks', 'lib', 'scripts', 'vendor', 'worker', 'public', 'docs', 'tests'];
-const files = ['package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'next.config.ts', 'postcss.config.mjs', 'eslint.config.mjs', 'components.json', 'drizzle.config.ts', 'cloudflare-env.d.ts', 'README.md', 'README.zh-CN.md', 'AGENTS.md', '.gitignore', '.npmrc', '.env.example', '启动客序.cmd', '安装微信提取组件.cmd'];
+const files = ['package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'next.config.ts', 'postcss.config.mjs', 'eslint.config.mjs', 'components.json', 'drizzle.config.ts', 'cloudflare-env.d.ts', 'README.md', 'README.zh-CN.md', 'AGENTS.md', '.gitignore', '.npmrc', '.env.example', '启动客序.cmd', '启动客序预览.cmd', '安装微信提取组件.cmd'];
 const forbidden = new Set(['node_modules', '.git', '.openai', '.local-wechat', '.wrangler', '.sites-runtime', '.vinext', '.next', 'dist', 'work', 'outputs', 'private', 'coverage', '.agents', '.codex', '__pycache__']);
 
 function allowed(relative) {

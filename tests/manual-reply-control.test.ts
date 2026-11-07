@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertManualReceipt, manualReplyError, observeManualReply, parseManualReplyRecord, prepareManualAttempt, type ManualAttempt } from '../app/components/manual-reply-control.ts';
+import { assertManualReceipt, manualAutoResumeConfirmed, manualReplyError, manualReplyTerminal, observeManualReply, parseManualReplyRecord, prepareManualAttempt, replyJobResolved, replyQueueJobs, type ManualAttempt } from '../app/components/manual-reply-control.ts';
 import type { ReplyJobView } from '../lib/types.ts';
 
 const source: ReplyJobView = { id: 'd574cc3e-4790-42a0-a374-dc056968d9c0', customerId: 'synthetic-customer', chatId: 'wxid_synthetic', kind: 'reply', status: 'handoff', message: { id: 'synthetic-message', text: '合成客户问题', date: '2026-11-07T00:00:00Z' }, createdAt: '2026-11-07T00:00:00Z', updatedAt: '2026-11-07T00:00:00Z' };
@@ -39,4 +39,49 @@ test('手动回复只轮询原任务，终态及时停止，断线或达到上�
   await assert.rejects(() => observeManualReply(source, expected, async () => { throw new Error('合成断线'); }, new AbortController().signal), /断线/);
   const aborted = new AbortController(); aborted.abort(new Error('工作区切换'));
   await assert.rejects(() => observeManualReply(source, expected, async () => job(), aborted.signal), /工作区切换/);
+});
+
+test('源卡片在精确的人工发送与托管恢复双重确认后才移出队列，历史和其他客户保留', () => {
+  const resolved = { ...source, resolvedAt: '2026-11-07T01:00:00Z', resolvedByManualJobId: job().id };
+  const manual = { ...job(), autoResumeStatus: 'restored' as const };
+  const other = { ...source, id: 'f1a6a7d5-15c8-4213-acdc-16c44172463f', customerId: 'other-customer', chatId: 'wxid_other' };
+  const rows = [manual, resolved, other];
+  assert.equal(replyJobResolved(resolved, rows), true);
+  assert.deepEqual(replyQueueJobs(rows), [other]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].reason, source.reason);
+  assert.equal(manualAutoResumeConfirmed(manual), true);
+  for (const patch of [{ autoResumeStatus: 'pending' as const }, { autoResumeStatus: 'blocked' as const }, { autoResumeStatus: undefined }, { sendMessageId: '' }, { sourceJobId: other.id }, { customerId: other.customerId }, { chatId: other.chatId }]) {
+    const incomplete = [resolved, { ...manual, ...patch }];
+    assert.deepEqual(replyQueueJobs(incomplete), [resolved]);
+  }
+  assert.equal(replyJobResolved({ ...resolved, resolvedAt: 'invalid-date' }, rows), false);
+  assert.equal(replyJobResolved({ ...resolved, resolvedByManualJobId: undefined }, rows), false);
+  assert.equal(replyJobResolved(resolved, [resolved]), false);
+});
+
+test('人工发送未决或失败不隐藏源卡片，旧发送回执未确认托管时也不误报完成', () => {
+  for (const status of ['draft', 'ready', 'sending', 'unknown', 'failed', 'handoff'] as const) {
+    const manual = { ...job(status), autoResumeStatus: 'restored' as const };
+    const claimed = { ...source, resolvedAt: '2026-11-07T01:00:00Z', resolvedByManualJobId: manual.id };
+    assert.equal(manualAutoResumeConfirmed(manual), false);
+    assert.deepEqual(replyQueueJobs([manual, claimed]), [claimed]);
+  }
+  assert.equal(manualAutoResumeConfirmed(job()), false);
+});
+
+test('微信已发送但托管恢复中只查询同一请求，恢复确认后才结束观察', async () => {
+  const expected = { ...attempt, jobId: job().id };
+  const pending = { ...job(), autoResumeStatus: 'pending' as const };
+  const restored = { ...job(), autoResumeStatus: 'restored' as const };
+  assert.equal(manualReplyTerminal(pending), false);
+  assert.equal(manualReplyTerminal(restored), true);
+  assert.equal(manualReplyTerminal({ ...job(), autoResumeStatus: 'blocked' }), true);
+  const querying: string[] = [];
+  const result = await observeManualReply(source, expected, async id => { querying.push(id); return querying.length === 1 ? pending : restored; }, new AbortController().signal, { wait: async () => {} });
+  assert.equal(result?.autoResumeStatus, 'restored');
+  assert.deepEqual(querying, [job().id, job().id]);
+  const restoring = { ...attempt, jobId: job().id, status: 'restoring' as const };
+  assert.equal(parseManualReplyRecord(JSON.stringify({ attempt: restoring, blockedTexts: [] }), source.id).attempt?.status, 'restoring');
+  assert.equal(prepareManualAttempt(source.id, attempt.text, restoring, [], () => { throw new Error('不能创建新请求'); }), restoring);
 });
