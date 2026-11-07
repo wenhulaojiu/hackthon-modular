@@ -44,3 +44,7 @@ yarn-error.log*
 
 # OS metadata
 .DS_Store
+
+# 本地提取运行资料与生成的安装包
+/.local-wechat/
+/public/kexu-local.zip

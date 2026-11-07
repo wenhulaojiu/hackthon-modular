@@ -25,7 +25,7 @@ export type PageId = 'overview' | 'customers' | 'marketing' | 'inbox' | 'setting
 export type AIResult = { summary?: string; tags?: string[]; preferences?: string; budget?: string; script?: string; nextFollowUpAt?: string; orders?: Array<{description:string;amount:number;date:string;type:'sale'|'refund';evidence:string}> };
 export type AiAction = 'profile' | 'marketing' | 'extract' | 'test';
 export type SharedProps = {
-  state: AppState; onChange: (next: AppState) => void; notify: (text: string, error?: boolean) => void;
+  state: AppState; onChange: (next: AppState) => Promise<boolean>; notify: (text: string, error?: boolean) => void;
   onAI: (action: AiAction, customerId?: string) => Promise<AIResult>;
 };
 export type CustomersProps = SharedProps & { selectedId: string | null; onSelect: (id: string | null) => void };

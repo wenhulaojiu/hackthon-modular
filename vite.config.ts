@@ -5,6 +5,7 @@ import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { configureToolEnvironment } from "./scripts/tool-environment.mjs";
 import { sites } from "./scripts/vite/sites-vite-plugin";
 import { connectorPreview } from "./scripts/vite/connector-preview-plugin.mjs";
+import localWechatPlugin from "./scripts/local-wechat/vite-plugin.mjs";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -45,6 +46,9 @@ export default defineConfig(async ({ command }) => {
 
   return {
     server: {
+      ...(process.env.KEXU_LOCAL_WECHAT === "1"
+        ? { host: "127.0.0.1", port: 5173, strictPort: true }
+        : {}),
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }
         : {}),
@@ -53,6 +57,7 @@ export default defineConfig(async ({ command }) => {
         : {}),
     },
     plugins: [
+      localWechatPlugin(),
       vinext(),
       sites({ mockAuth: !managedLinux }),
       connectorPreview(),

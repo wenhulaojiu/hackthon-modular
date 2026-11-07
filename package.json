@@ -11,7 +11,12 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "local": "node scripts/local-wechat/launch.mjs",
+    "wechat:setup": "node scripts/local-wechat/setup.mjs",
+    "package:local": "node scripts/package-local.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/local-wechat.test.mjs app/api/backend.test.mjs && node --experimental-strip-types --test tests/domain.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

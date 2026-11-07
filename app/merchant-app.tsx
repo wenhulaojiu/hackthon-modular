@@ -20,10 +20,11 @@ export default function MerchantApp({displayName}:{displayName:string}){
   async function load(){setLoadError('');try{const r=await fetch('/api/state');const d=await json(r);if(!r.ok)throw Error(d.error||'数据加载失败');revision.current=d.revision;saved.current=d.state;blocked.current=false;setState(d.state);setHasApiKey(d.hasApiKey);setSaveStatus('已保存')}catch(e){setLoadError((e as Error).message)}}
   useEffect(()=>{void load()},[]);
   function onChange(next:AppState){
-    if(new TextEncoder().encode(JSON.stringify(next)).length>1450000){notify('当前数据已接近体验版容量，请减少聊天条数后重试',true);return}
-    if(blocked.current){notify('保存存在冲突，请刷新后重新操作',true);return}
+    if(new TextEncoder().encode(JSON.stringify(next)).length>1450000){notify('当前数据已接近体验版容量，请减少聊天条数后重试',true);return Promise.resolve(false)}
+    if(blocked.current){notify('保存存在冲突，请刷新后重新操作',true);return Promise.resolve(false)}
     setState(next);setSaveStatus('保存中');const edit=++edits.current;
     queue.current=queue.current.then(async()=>{if(blocked.current)return;const r=await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:next,revision:revision.current})});const d=await json(r);if(!r.ok)throw Error(d.error||'保存失败');revision.current=d.revision;saved.current=next;if(edit===edits.current)setSaveStatus('已保存')}).catch(e=>{blocked.current=true;setSaveStatus('保存失败');if(saved.current)setState(saved.current);notify(e.message+'，请刷新后重试',true)});
+    return queue.current.then(()=>!blocked.current);
   }
   async function onAI(action:AiAction,customerId?:string):Promise<AIResult>{await queue.current;if(blocked.current)throw Error('请先解决保存冲突');const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,customerId})});const d=await json(r);if(!r.ok)throw Error(d.error||'AI 请求失败');return d}
   async function onSaveKey(apiKey:string,remove?:boolean){const r=await fetch('/api/secret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey,remove})});const d=await json(r);if(!r.ok)throw Error(d.error||'密钥保存失败');setHasApiKey(!remove)}

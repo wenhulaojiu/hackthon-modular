@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./kexu.css";
 import "./components/components.css";
+import "./components/local-wechat.css";
 
 export const metadata: Metadata = {
   title: "客序 · 商家经营工作台",
