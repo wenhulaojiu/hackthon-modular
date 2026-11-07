@@ -3,18 +3,72 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 // 收件复用只读导出组件；发送网关须由用户另行安装并在本机验收。
-export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace } = {}) {
+export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace, nativeSender } = {}) {
   let config;
   let startedAt = 0;
   let paused = true;
   let lastError = '';
   let activeScopedGrant = null;
   let sendQueue = Promise.resolve();
+  let lifecycle = 0;
+  let configRevision = 0;
+  let activeTransport = null;
+  let nativePause = Promise.resolve();
+  const nativeAttempts = new Map();
   const scopedAttempts = new Map();
   const scopedType = 'scoped-test-http';
   const privateChatId = value => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\u0000-\u001f]/.test(value) && value !== 'filehelper' && !value.endsWith('@chatroom');
   function assertCurrent() {
     if (workspace && currentWorkspace?.() !== workspace.workspaceToken) throw Object.assign(new Error('微信工作区已切换，接待已停止，请刷新后重新启动。'), { status: 409, code: 'WORKSPACE_CHANGED' });
+  }
+
+  function pauseNative() {
+    let pending;
+    try { pending = Promise.resolve(nativeSender?.pause()); } catch (error) { pending = Promise.reject(error); }
+    nativePause = Promise.all([nativePause.catch(() => {}), pending]).then(() => {});
+    nativePause.catch(() => {});
+    return nativePause;
+  }
+
+  async function nativeStatus(probe) {
+    if (!nativeSender) return null;
+    const value = await nativeSender.status({ probe });
+    assertCurrent();
+    if (!value || typeof value.configured !== 'boolean' || value.configured === false && value.canSend === true) throw new Error('内置原生发送器状态不完整。');
+    if (value.workspaceToken !== undefined && value.workspaceToken !== workspace?.workspaceToken) throw new Error('内置原生发送器账号与当前工作区不一致。');
+    if (value.configured && (value.mode !== 'native-background' || value.requiresForeground !== false || ['start', 'syncConfig', 'pause', 'send'].some(method => typeof nativeSender[method] !== 'function'))) throw new Error('内置原生发送器尚未提供完整的后台发送能力。');
+    return value;
+  }
+
+  function nativeRecipient(chatId) {
+    const selected = new Set(config?.settings?.selectedCustomerIds || []);
+    const matches = (config?.customers || []).filter(customer => customer.wechatId === chatId);
+    return config?.settings?.enabled === true && privateChatId(chatId) && matches.length === 1 && selected.has(matches[0].id) && matches[0].autoReplyEnabled === true && !matches[0].humanTakeover;
+  }
+
+  async function sendNative(input, ticket, revision) {
+    const { chatId, text, idempotencyKey } = input;
+    if (typeof text !== 'string' || !text.trim() || text.length > 4000 || typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 200 || /[\u0000-\u001f]/.test(idempotencyKey) || !nativeRecipient(chatId)) return { status: 'failed', error: '原生发送请求或客户白名单无效。' };
+    const textSha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+    const prior = nativeAttempts.get(idempotencyKey);
+    if (prior) return prior.chatId === chatId && prior.textSha256 === textSha256 ? prior.result : { status: 'failed', error: '同一幂等标识不能用于不同会话或正文。' };
+    try {
+      const current = await nativeStatus(true);
+      if (!current?.configured || !current.canSend) throw new Error();
+      assertCurrent();
+      if (paused || ticket !== lifecycle || revision !== configRevision || !nativeRecipient(chatId)) throw new Error();
+    } catch { return { status: 'failed', error: '原生后台发送尚未就绪，或接待规则已变化，请重新核对后启动。' }; }
+    if (nativeAttempts.size >= 5000) return { status: 'failed', error: '本次接待的发送记录已满，请暂停整理后重启。' };
+    // 先保留未知结果，再调用原生发送；异常不重试，也不改用其他发送器。
+    const attempt = { chatId, textSha256, result: { status: 'unknown', error: '原生发送结果未知，请核对微信；不会重发。' } };
+    nativeAttempts.set(idempotencyKey, attempt);
+    try {
+      const result = await nativeSender.send({ chatId, text, idempotencyKey });
+      assertCurrent();
+      if (result?.status === 'sent' && typeof result.messageId === 'string' && result.messageId.trim() && result.messageId.length <= 200 && !/[\u0000-\u001f]/.test(result.messageId)) attempt.result = { status: 'sent', messageId: result.messageId };
+      else if (result?.status === 'failed') attempt.result = { status: 'failed', error: '原生发送未执行成功，请检查本机发送器状态。' };
+    } catch { /* 请求可能已生效，保留未知状态供人工核对。 */ }
+    return attempt.result;
   }
 
   async function gateway() {
@@ -89,32 +143,59 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     let canSend = false;
     let configured = false;
     let target = null;
+    let nativeInfo = null;
     let message = local.message || '本机只读组件可生成接待草稿；自动发送尚未接通。';
     try {
-      target = await gateway();
+      if (nativeSender) {
+        // 内置发送器一旦被明确选择，即使停用或异常也不自动降级到旧网关。
+        target = { type: 'native-background' }; configured = true;
+        nativeInfo = await nativeStatus(probe);
+        if (nativeInfo.configured) {
+          canSend = nativeInfo.canSend === true;
+          message = typeof nativeInfo.message === 'string' ? nativeInfo.message.slice(0, 400) : '已选择内置原生后台发送器。';
+        } else { target = null; configured = false; }
+      }
+      if (!target) target = await gateway();
       configured = !!target;
-      if (target && probe) {
+      if (target?.type === 'native-background') { /* 原生状态由已绑定工作区的发送器核验。 */ }
+      else if (target && probe) {
         canSend = await probeGateway(target, candidate);
         message = canSend ? target.type === scopedType ? '临时单会话测试网关已就绪，仅限已授权客户、五分钟内最多三条发送尝试。' : '已连接本机发送网关；发送后须按会话回读确认。' : '发送网关未报告稳定会话 ID、发送防重和消息回读能力。';
       } else if (target) message = '已配置本机发送网关，等待检测连接。';
-    } catch (error) { message = error.message; }
-    return { info: { configured, canReceive, canSend, type: 'exporter-poll', message: lastError || message }, target };
+    } catch (error) { canSend = false; message = target?.type === 'native-background' ? '内置原生后台发送器暂不可用，请检查本机配置。' : error.message; }
+    assertCurrent();
+    return { info: { configured, canReceive, canSend, type: 'exporter-poll', ...(target?.type === 'native-background' ? { mode: 'native-background', requiresForeground: false } : {}), message: lastError || message }, target };
   }
 
   async function status(options) { return (await inspectStatus(options)).info; }
 
   async function start(next) {
     assertCurrent();
+    const ticket = ++lifecycle;
+    const revision = configRevision;
     paused = true;
+    await pauseNative();
     const { info: ready, target } = await inspectStatus({ probe: true, candidate: next });
     assertCurrent();
+    if (ticket !== lifecycle || revision !== configRevision) throw new Error('接待启动期间规则已变化，请重新启动。');
     if (!ready.canReceive) throw new Error(ready.message || '请先安装并配置本机微信只读组件。');
     if (target?.type === scopedType && !ready.canSend) throw new Error(ready.message);
     if (next.settings.mode === 'auto' && !ready.canSend) throw new Error('自动发送尚未接通，请先使用草稿接待，或安装并验收本机发送网关。');
     const allowed = new Set(next.settings.selectedCustomerIds);
     const ids = next.customers.filter(c => allowed.has(c.id) && c.autoReplyEnabled && !c.humanTakeover).map(c => c.wechatId);
     if (!ids.length || ids.length > 20 || new Set(ids).size !== ids.length) throw new Error('本地接待每次支持 1–20 位微信标识明确且不重复的好友。');
+    if (target?.type === 'native-background') {
+      if (next.settings.enabled !== true || ids.some(id => !privateChatId(id) || next.customers.filter(customer => customer.wechatId === id).length !== 1)) throw new Error('请先启用规则，并核对原生发送的私聊白名单。');
+      if (ready.canSend) {
+        try {
+          await nativeSender.start(next);
+          assertCurrent();
+          if (ticket !== lifecycle || revision !== configRevision) throw new Error('接待启动期间已暂停或规则已变化。');
+        } catch (error) { await pauseNative().catch(() => {}); throw error; }
+      }
+    }
     config = next;
+    activeTransport = target?.type === 'native-background' ? 'native-background' : 'http';
     activeScopedGrant = target?.type === scopedType ? { key: grantKey(target), target } : null;
     // 原始消息为秒精度；取下一秒，避免处理启动前同一秒的旧消息。
     startedAt = Math.ceil(now() / 1000) * 1000;
@@ -122,7 +203,15 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     paused = false;
   }
 
-  function syncConfig(next) { config = next; }
+  async function syncConfig(next) {
+    assertCurrent();
+    if (JSON.stringify(config) !== JSON.stringify(next)) configRevision += 1;
+    config = next;
+    try {
+      if (nativeSender) await nativeSender.syncConfig(next);
+      assertCurrent();
+    } catch (error) { paused = true; lifecycle += 1; await pauseNative().catch(() => {}); throw error; }
+  }
 
   async function poll() {
     assertCurrent();
@@ -178,6 +267,14 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     if (paused || !config) return { status: 'failed', error: '本地接待已暂停。' };
     const selected = new Set(config.settings.selectedCustomerIds);
     if (!config.customers.some(c => c.wechatId === chatId && selected.has(c.id) && c.autoReplyEnabled && !c.humanTakeover)) return { status: 'failed', error: '该会话不在客服白名单或已由人工接管。' };
+    const ticket = lifecycle, revision = configRevision;
+    if (activeTransport === 'native-background') return sendNative({ chatId, text, idempotencyKey }, ticket, revision);
+    if (nativeSender) {
+      try {
+        const current = await nativeStatus(true);
+        if (current.configured || paused || ticket !== lifecycle || revision !== configRevision) return { status: 'failed', error: '发送器或接待规则已变化，请重新核对后启动。' };
+      } catch { return { status: 'failed', error: '无法核对原生发送器，未调用其他发送网关。' }; }
+    }
     let target;
     try { target = await gateway(); } catch (error) { return { status: 'failed', error: error.message }; }
     if (!target) return { status: 'failed', error: '尚未安装本机发送网关。' };
@@ -219,7 +316,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     return pending;
   }
 
-  function pause() { paused = true; }
-  function fail(error) { lastError = error?.message || '本地读取异常。'; paused = true; }
+  function pause() { paused = true; lifecycle += 1; return pauseNative(); }
+  function fail(error) { lastError = error?.message || '本地读取异常。'; return pause(); }
   return { status, start, syncConfig, poll, send, pause, fail };
 }

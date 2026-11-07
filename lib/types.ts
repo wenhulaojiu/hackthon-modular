@@ -29,6 +29,11 @@ export type ReplySettings = {
   faq: FAQ[]; handoffKeywords: string[]; maxReplyChars: number; cooldownSeconds: number; debounceSeconds?: number; prompt: string;
 };
 export type ReplyResult = { action: 'reply' | 'handoff'; reply: string; reason: string; productIds?: string[] };
+export type NativeSenderStatus = {
+  available: boolean; installed: boolean; enabled: boolean; ready: boolean; compatible: boolean;
+  requiresForeground: false; message: string; componentVersion?: string | null;
+  source: 'helper'; setupState: 'idle' | 'installing' | 'failed' | 'ready';
+};
 export type ReplyMessage = { id: string; text: string; date: string; nativeMessageId?: string };
 export type ReplyContextMessage = { sender: 'customer' | 'merchant'; text: string; date: string };
 export type ReplyJobStatus = 'queued' | 'generating' | 'draft' | 'ready' | 'sending' | 'sent' | 'handoff' | 'failed' | 'unknown' | 'ignored' | 'cancelled';

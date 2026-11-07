@@ -21,7 +21,7 @@ async function fixture(t, options = {}) {
   const reader = { inspect: async () => ready, readForReplies: async ids => { reads.push(ids); return [{ metadata: { chat_type: 'private', chat_username: 'wxid_customer' }, messages }]; } };
   const adapter = createReplyAdapter({ root, reader, now: () => timestamp, ...options });
   t.after(async () => {
-    adapter.pause();
+    await adapter.pause();
     const resolved = await realpath(root);
     assert.equal(path.dirname(resolved).toLowerCase(), parent.toLowerCase());
     assert.ok(path.basename(resolved).startsWith('kexu-adapter-test-'));
@@ -317,4 +317,162 @@ test('生产引擎auto接收新消息后自动生成并经受限适配器发送�
     assert.equal(f.sends[0].chatId, 'wxid_customer');
     assert.equal(f.sends[0].text, '面包10元。');
   } finally { await engine.close(); }
+});
+
+function builtinSender() {
+  const state = { configured: true, canSend: true, mode: 'native-background', requiresForeground: false, message: '合成原生后台发送器' };
+  const calls = { status: [], start: [], sync: [], pause: 0, send: [] };
+  const hooks = {};
+  const sender = {
+    status: async options => { calls.status.push(options); await hooks.status?.(); return { ...state }; },
+    start: async value => { calls.start.push(structuredClone(value)); await hooks.start?.(); },
+    syncConfig: async value => { calls.sync.push(structuredClone(value)); await hooks.sync?.(); },
+    pause: () => { calls.pause += 1; return hooks.pause?.(); },
+    send: async value => { calls.send.push(value); return hooks.send ? hooks.send(value) : { status: 'sent', messageId: 'native-builtin-1' }; },
+  };
+  return { sender, state, calls, hooks };
+}
+
+const builtinConfig = (mode = 'auto') => ({ ...config(), settings: { ...config().settings, enabled: true, mode } });
+
+test('注入原生发送器保持默认暂停，显式启动才传完整规则并优先于旧HTTP', async t => {
+  const n = builtinSender(); let http = 0;
+  const f = await fixture(t, { nativeSender: n.sender, fetch: async () => { http += 1; throw Error('不得调用旧网关'); } });
+  await f.gateway({ type: 'verified-http', baseUrl: 'http://127.0.0.1:8000', token: 'synthetic-unused-http' });
+  const status = await f.adapter.status({ probe: true });
+  assert.equal(status.canSend, true); assert.equal(status.requiresForeground, false); assert.equal(status.mode, 'native-background');
+  assert.deepEqual(await f.adapter.poll(), []);
+  assert.equal((await f.adapter.send(sendInput('before-start'))).status, 'failed');
+  assert.equal(n.calls.start.length, 0); assert.equal(n.calls.send.length, 0);
+  const value = builtinConfig();
+  await f.adapter.syncConfig(value); assert.deepEqual(n.calls.sync, [value]);
+  await f.adapter.start(value); assert.deepEqual(n.calls.start, [value]);
+  assert.deepEqual(await f.adapter.send(sendInput('native-one')), { status: 'sent', messageId: 'native-builtin-1' });
+  assert.deepEqual(n.calls.send, [sendInput('native-one')]); assert.equal(http, 0);
+});
+
+test('已选择但停用或异常的原生发送器不降级HTTP，review仍可只读接待', async t => {
+  for (const fault of ['disabled', 'status-error', 'foreground-required']) await t.test(fault, async child => {
+    const n = builtinSender(); let http = 0;
+    if (fault === 'disabled') n.state.canSend = false;
+    if (fault === 'status-error') n.hooks.status = () => { throw Error('合成组件不可用'); };
+    if (fault === 'foreground-required') n.state.requiresForeground = true;
+    const f = await fixture(child, { nativeSender: n.sender, fetch: async () => { http += 1; throw Error('不得降级'); } });
+    await f.gateway({ type: 'verified-http', baseUrl: 'http://127.0.0.1:8000', token: 'synthetic-unused-http' });
+    const status = await f.adapter.status({ probe: true });
+    assert.equal(status.configured, true); assert.equal(status.canSend, false);
+    await assert.rejects(f.adapter.start(builtinConfig()), /自动发送尚未接通/);
+    await f.adapter.start(builtinConfig('review'));
+    assert.equal((await f.adapter.send(sendInput('blocked'))).status, 'failed');
+    assert.equal(n.calls.start.length, 0); assert.equal(n.calls.send.length, 0); assert.equal(http, 0);
+  });
+});
+
+test('原生明确未配置时保留verified-http与scoped-test-http兼容路径', async t => {
+  const n = builtinSender(); n.state.configured = false; n.state.canSend = false;
+  let httpSends = 0;
+  const f = await fixture(t, { nativeSender: n.sender, fetch: async (url, init) => {
+    if (url.endsWith('/status')) return Response.json({ protocol: 'kexu-reply-v1', ready: true, capabilities: { stableChatIds: true, readback: true, idempotentSend: true } });
+    httpSends += 1; const body = JSON.parse(init.body);
+    return Response.json({ status: 'sent', chatId: body.chatId, messageId: 'http-native-fallback', textSha256: createHash('sha256').update(body.text).digest('hex'), readback: true });
+  } });
+  await f.gateway({ type: 'verified-http', baseUrl: 'http://127.0.0.1:8000', token: 'synthetic-http-fallback' });
+  await f.adapter.start(builtinConfig());
+  assert.deepEqual(await f.adapter.send(sendInput('http-one')), { status: 'sent', messageId: 'http-native-fallback' });
+  assert.equal(httpSends, 1); assert.equal(n.calls.start.length, 0); assert.equal(n.calls.send.length, 0);
+  // 原有受限协议测试仍独立覆盖单账号、唯一会话、期限及配额约束。
+  const scoped = await scopedFixture(t);
+  await scoped.adapter.start(autoConfig());
+  assert.equal((await scoped.adapter.send(sendInput('scoped-still-valid'))).status, 'sent');
+});
+
+test('原生发送前仍阻止非白名单、人工接管、重复映射和关闭总开关', async t => {
+  for (const change of ['outside', 'takeover', 'duplicate', 'disabled']) await t.test(change, async child => {
+    const n = builtinSender(); const f = await fixture(child, { nativeSender: n.sender });
+    await f.adapter.start(builtinConfig());
+    const next = builtinConfig();
+    if (change === 'takeover') next.customers[0].humanTakeover = true;
+    if (change === 'duplicate') next.customers.push({ id: 'duplicate', wechatId: 'wxid_customer', autoReplyEnabled: true });
+    if (change === 'disabled') next.settings.enabled = false;
+    await f.adapter.syncConfig(next);
+    const input = { ...sendInput('guarded'), ...(change === 'outside' ? { chatId: 'wxid_outside' } : {}) };
+    assert.equal((await f.adapter.send(input)).status, 'failed');
+    assert.equal(n.calls.send.length, 0);
+  });
+});
+
+test('原生预检等待期间暂停、接管或换工作区均不能实际调用send', async t => {
+  for (const change of ['pause', 'takeover', 'workspace']) await t.test(change, async child => {
+    const workspace = { id: 'acct-aaaaaaaaaaaaaaaaaaaa', workspaceToken: 'acct-aaaaaaaaaaaaaaaaaaaa@1' }; let token = workspace.workspaceToken;
+    const n = builtinSender(); const f = await fixture(child, { nativeSender: n.sender, workspace, currentWorkspace: () => token });
+    await f.adapter.start(builtinConfig());
+    let release; const entered = new Promise(resolve => { n.hooks.status = async () => { resolve(); await new Promise(done => { release = done; }); }; });
+    const sending = f.adapter.send(sendInput('race'));
+    await entered;
+    if (change === 'pause') await f.adapter.pause();
+    if (change === 'takeover') { const next = builtinConfig(); next.customers[0].humanTakeover = true; await f.adapter.syncConfig(next); }
+    if (change === 'workspace') token = 'acct-aaaaaaaaaaaaaaaaaaaa@2';
+    release();
+    assert.equal((await sending).status, 'failed'); assert.equal(n.calls.send.length, 0);
+  });
+});
+
+test('原生异常或畸形sent回执成为unknown，同幂等键不会重发或改走HTTP', async t => {
+  for (const kind of ['throw', 'missing-id', 'unknown']) await t.test(kind, async child => {
+    const n = builtinSender(); let http = 0;
+    n.hooks.send = () => { if (kind === 'throw') throw Error('合成发送后断连'); return kind === 'unknown' ? { status: 'unknown' } : { status: 'sent' }; };
+    const f = await fixture(child, { nativeSender: n.sender, fetch: async () => { http += 1; throw Error('不得降级'); } });
+    await f.adapter.start(builtinConfig());
+    const first = await f.adapter.send(sendInput('same'));
+    assert.equal(first.status, 'unknown');
+    assert.deepEqual(await f.adapter.send(sendInput('same')), first);
+    assert.equal((await f.adapter.send({ ...sendInput('same'), text: '另一条合成正文' })).status, 'failed');
+    assert.equal(n.calls.send.length, 1); assert.equal(http, 0);
+  });
+});
+
+test('原生发出后工作区切换保留unknown，旧服务暂停仍等待sender安全结束', async t => {
+  const workspace = { id: 'acct-aaaaaaaaaaaaaaaaaaaa', workspaceToken: 'acct-aaaaaaaaaaaaaaaaaaaa@1' }; let token = workspace.workspaceToken;
+  const n = builtinSender(); const f = await fixture(t, { nativeSender: n.sender, workspace, currentWorkspace: () => token });
+  await f.adapter.start(builtinConfig());
+  let finish; const entered = new Promise(resolve => { n.hooks.send = async () => { resolve(); return new Promise(done => { finish = done; }); }; });
+  const pending = f.adapter.send(sendInput('in-flight'));
+  await entered;
+  token = 'acct-aaaaaaaaaaaaaaaaaaaa@2';
+  let unpause; n.hooks.pause = () => new Promise(resolve => { unpause = resolve; });
+  let stopped = false; const stopping = f.adapter.pause().then(() => { stopped = true; });
+  await Promise.resolve(); assert.equal(stopped, false);
+  finish({ status: 'sent', messageId: 'old-account-result' });
+  assert.equal((await pending).status, 'unknown');
+  unpause(); await stopping;
+  n.hooks.pause = undefined;
+  assert.equal(stopped, true); assert.equal(n.calls.send.length, 1);
+});
+
+test('原生启动和规则同步必须等待完成，同步失败保持暂停', async t => {
+  const n = builtinSender(); const f = await fixture(t, { nativeSender: n.sender });
+  let finishStart; const started = new Promise(resolve => { n.hooks.start = async () => { resolve(); await new Promise(done => { finishStart = done; }); }; });
+  let running = false; const starting = f.adapter.start(builtinConfig()).then(() => { running = true; });
+  await started; assert.equal(running, false);
+  await f.adapter.pause(); finishStart();
+  await assert.rejects(starting, /已暂停|变化/); assert.equal(running, false);
+  n.hooks.start = undefined;
+  await f.adapter.start(builtinConfig());
+  let finishSync; const synced = new Promise(resolve => { n.hooks.sync = async () => { resolve(); await new Promise(done => { finishSync = done; }); }; });
+  let completed = false; const syncing = f.adapter.syncConfig(builtinConfig()).then(() => { completed = true; });
+  await synced; assert.equal(completed, false); finishSync(); await syncing;
+  n.hooks.sync = () => { throw Error('合成同步失败'); };
+  await assert.rejects(f.adapter.syncConfig(builtinConfig()));
+  assert.equal((await f.adapter.send(sendInput('after-failure'))).status, 'failed');
+});
+
+test('运行中启用原生或关闭已选原生都不会热切换到其他发送器', async t => {
+  const n = builtinSender(); n.state.configured = false; n.state.canSend = false;
+  const f = await fixture(t, { nativeSender: n.sender, fetch: async () => { throw Error('没有配置HTTP'); } });
+  await f.adapter.start(builtinConfig('review'));
+  n.state.configured = true; n.state.canSend = true;
+  assert.equal((await f.adapter.send(sendInput('changed-source'))).status, 'failed'); assert.equal(n.calls.send.length, 0);
+  await f.adapter.start(builtinConfig());
+  n.state.canSend = false;
+  assert.equal((await f.adapter.send(sendInput('disabled-native'))).status, 'failed'); assert.equal(n.calls.send.length, 0);
 });

@@ -85,6 +85,30 @@
 .reply-control-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
 .reply-control-actions .btn { font-size: 13px; }
 .reply-control-actions .icon-button { color: var(--kexu-muted); }
+.native-sender-card { padding: 21px 24px; margin-bottom: 21px; background: var(--kexu-panel); }
+.native-sender-heading { display: flex; align-items: center; gap: 12px; }
+.native-sender-icon { display: grid; place-items: center; flex: 0 0 39px; height: 39px; border-radius: 11px; background: var(--kexu-accent-soft); color: var(--kexu-muted); }
+.native-sender-heading > div { flex: 1; min-width: 0; }
+.native-sender-heading h3 { margin: 0; color: var(--kexu-ink); font-size: 14px; font-weight: 550; }
+.native-sender-heading p { margin-top: 6px; color: var(--kexu-muted); font-size: 12px; line-height: 1.8; }
+.native-sender-status { display: flex; align-items: center; gap: 6px; color: var(--kexu-muted); white-space: nowrap; font-size: 12px; }
+.native-sender-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--kexu-line); }
+.native-sender-status.ready { color: #7a9063; }
+.native-sender-card.ready .native-sender-icon { background: var(--kexu-accent); }
+.native-sender-body { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 16px; padding-top: 15px; border-top: 1px solid var(--kexu-line); }
+.native-sender-body > div:first-child { min-width: 0; }
+.native-sender-body p { color: var(--kexu-ink); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.native-sender-body small { display: block; margin-top: 6px; color: var(--kexu-muted); font-size: 11px; line-height: 1.9; }
+.native-sender-body small > span { display: block; }
+.native-sender-actions { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
+.native-sender-error { display: flex; align-items: center; gap: 7px; color: #a48e70; font-size: 12px; margin-top: 11px; line-height: 1.8; }
+@media (max-width: 760px) {
+  .native-sender-card { padding: 18px; }
+  .native-sender-heading { flex-wrap: wrap; }
+  .native-sender-status { margin-left: 51px; }
+  .native-sender-body { align-items: flex-start; flex-direction: column; gap: 13px; }
+  .native-sender-actions { flex-wrap: wrap; }
+}
 .reply-center-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 23px; }
 .reply-center-stats > div { display: flex; align-items: center; gap: 14px; padding: 20px; border: 1px solid var(--kexu-line); border-radius: 11px; background: #fff; }
 .reply-stat-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--kexu-accent-soft); color: var(--kexu-muted); }

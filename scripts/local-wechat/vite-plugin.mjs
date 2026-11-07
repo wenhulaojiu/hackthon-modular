@@ -2,6 +2,7 @@ import { createLocalWechatService, LocalError, guardLocalRequest, readLocalBody,
 import { createLocalReplyService } from "./reply-service.mjs";
 import { createAccountRegistry } from "./accounts.mjs";
 import { createLocalModelTransport } from "./model-transport.mjs";
+import { createNativeSenderService } from "./native-sender-service.mjs";
 
 function trustedHeader(request, name, value) {
   delete request.headers[name];
@@ -12,21 +13,26 @@ function trustedHeader(request, name, value) {
 }
 
 // 账号切换由唯一运行时串行完成；旧服务闭包在关闭开始时立即失效。
-export async function createLocalAccountRuntime({ root, origin, registry: suppliedRegistry, readerFactory = createLocalWechatService, replyFactory = createLocalReplyService, providerNetwork } = {}) {
+export async function createLocalAccountRuntime({ root, origin, registry: suppliedRegistry, readerFactory = createLocalWechatService, replyFactory = createLocalReplyService, nativeSenderFactory = createNativeSenderService, providerNetwork } = {}) {
   const registry = suppliedRegistry || await createAccountRegistry({ root });
   let reader;
   let replies;
+  let nativeSender;
   let busy = false;
   let closed = false;
   const currentWorkspace = () => busy || closed ? null : registry.active().workspaceToken;
   function openServices() {
     const workspace = registry.active();
     reader = readerFactory({ root, workspace, currentWorkspace, providerNetwork, expectedDbDir: () => registry.binding?.() });
-    replies = Promise.resolve(replyFactory({ root, reader, origin, workspace, currentWorkspace }));
+    nativeSender = nativeSenderFactory({ root, workspace, currentWorkspace, onDisable: async () => { await (await replies).pause?.(); } });
+    replies = Promise.resolve(replyFactory({ root, reader, origin, workspace, currentWorkspace, nativeSender, nativeVerificationMode: process.env.KEXU_NATIVE_VERIFICATION === '1' }));
     replies.catch(() => {});
   }
   async function stopServices() {
-    await Promise.all([reader?.close(), replies?.then(value => value.close()).catch(() => {})]);
+    // 原生调用可能已送出，先等待安全结束，再关闭只读回读及切换数据账号。
+    await replies?.then(value => value.close()).catch(() => {});
+    await nativeSender?.close();
+    await reader?.close();
   }
   function expected(request) {
     if (request.headers['x-kexu-workspace'] !== registry.active().workspaceToken) throw new LocalError(409, '微信工作区已切换，请刷新页面后重试。', 'WORKSPACE_CHANGED');
@@ -82,6 +88,7 @@ export async function createLocalAccountRuntime({ root, origin, registry: suppli
         return true;
       }
       if (pathname === '/__local-wechat/replies' || pathname.startsWith('/__local-wechat/replies/')) return await (await replies).handle(request, response);
+      if (pathname.startsWith('/__local-wechat/native-sender/')) return await nativeSender.handle(request, response);
       return await reader.handle(request, response);
     } catch (error) {
       if (!response.headersSent && !response.destroyed) sendLocalJson(response, error.status || 503, { error: error.status ? error.message : '本机工作区暂不可用，请检查本地账号配置后重试。', ...(error.code === 'WORKSPACE_CHANGED' ? { code: error.code } : {}) });

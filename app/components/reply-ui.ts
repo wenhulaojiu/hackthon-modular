@@ -1,5 +1,5 @@
-import type { AppState, ReplySettings } from '../../lib/types';
-import { assertWorkspaceCurrent, captureWorkspace, workspaceFetch } from '../../lib/client-workspace';
+import type { AppState, NativeSenderStatus, ReplySettings } from '../../lib/types';
+import { assertWorkspaceCurrent, captureWorkspace, workspaceFetch } from '../../lib/client-workspace.ts';
 
 export function replySettingsFor(state: AppState): ReplySettings {
   const value = state.replySettings;
@@ -26,7 +26,8 @@ export function replyConfigFor(state: AppState) {
 }
 
 export class ReplyBridgeError extends Error {
-  constructor(message: string, public status?: number) { super(message); this.name = 'ReplyBridgeError'; }
+  status?: number;
+  constructor(message: string, status?: number) { super(message); this.name = 'ReplyBridgeError'; this.status = status; }
 }
 
 export async function replyRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -42,4 +43,27 @@ export async function replyRequest<T>(path: string, body?: unknown, signal?: Abo
 
 export async function syncLocalReplyConfig(state: AppState) {
   if (localRepliesAvailable()) await replyRequest('/config', replyConfigFor(state));
+}
+
+// 首次启用由本机接口核对现场账号与版本，不能用尚未绑定的兼容状态阻断入口。
+export const nativeSenderCanEnable = (status: NativeSenderStatus | null) => !!status?.available && status.installed && !status.enabled && status.setupState !== 'installing';
+
+export async function nativeSenderRequest(action: 'status' | 'setup' | 'enable' | 'disable', signal?: AbortSignal): Promise<NativeSenderStatus> {
+  if (!localRepliesAvailable()) throw new ReplyBridgeError('原生后台发送需要在 Windows 本地版中准备。');
+  const expected = captureWorkspace();
+  // 组件接口只提交空对象，不携带聊天正文、客户标识或模型密钥。
+  const response = await workspaceFetch(`/__local-wechat/native-sender/${action}`, {
+    method: action === 'status' ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'X-Kexu-Local': '1', Accept: 'application/json', ...(action === 'status' ? {} : { 'Content-Type': 'application/json' }) },
+    ...(action === 'status' ? {} : { body: '{}' }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+  }, expected);
+  let payload: unknown;
+  try { payload = await response.json(); }
+  catch { throw new ReplyBridgeError(response.status === 404 ? '此本地版尚未提供原生发送组件，请更新后重试。' : '原生发送组件返回了无法识别的结果。', response.status); }
+  assertWorkspaceCurrent(expected);
+  const value = payload as Partial<NativeSenderStatus> & { error?: unknown } | null;
+  if (!response.ok) throw new ReplyBridgeError(typeof value?.error === 'string' ? value.error : typeof value?.message === 'string' ? value.message : `原生发送组件请求失败（${response.status}）`, response.status);
+  if (!value || ['available', 'installed', 'enabled', 'ready', 'compatible'].some(key => typeof (value as Record<string, unknown>)[key] !== 'boolean') || value.requiresForeground !== false || value.source !== 'helper' || typeof value.message !== 'string' || !['idle', 'installing', 'failed', 'ready'].includes(value.setupState ?? '') || (value.componentVersion != null && typeof value.componentVersion !== 'string')) throw new ReplyBridgeError('原生发送组件状态不完整，请更新本地版后重试。');
+  return value as NativeSenderStatus;
 }
