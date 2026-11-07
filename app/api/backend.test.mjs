@@ -427,6 +427,57 @@ test("旧schemaVersion1仍兼容，新增商品与回复规则可持久化", asy
   } finally { f.close(); }
 });
 
+test("读取旧比赛模板只迁移商品和店铺视图，不改历史或数据库revision，CAS保存后才持久化", async () => {
+  const f = fixture();
+  try {
+    await replyFixture(f);
+    const current = await f.server.loadState('alice');
+    const old = current.state;
+    old.settings.storeName = '青禾生活馆';
+    const base = { id: 'legacy-demo-product', name: '美式咖啡', type: 'product', price: 18, description: '【比赛演示资料】现磨咖啡，可选热饮或冰饮。', faq: [], enabled: true };
+    old.products = [
+      { ...base, source: 'demo' },
+      { ...base, id: 'manual-product', source: 'manual' },
+      { ...base, id: 'explicit-unknown', source: 'demo', stock: null, restockThreshold: 0 },
+      { ...base, id: 'manual-stock', source: 'demo', stock: 17, restockThreshold: 3 },
+    ];
+    old.replySettings.storeInfo = { phone: '演示电话（未开放）', address: '青禾市拾光路18号（虚构地址）', serviceContent: '比赛演示店铺：现磨咖啡、每日烘焙、鲜花与生活礼品；提供咖啡体验、花艺体验和礼品包装。' };
+    old.replySettings.welcomeMessage = '你好，欢迎来到青禾生活馆！这是比赛演示店铺，提供现磨咖啡、每日烘焙、鲜花与生活礼品，也有咖啡体验、花艺体验和礼品包装服务。演示营业时间为每天09:00–21:00，欢迎直接留言咨询商品或服务。';
+    old.customers[0].source = 'wechat';
+    old.customers[0].messages.push({ id: 'historical-prefix', sender: 'merchant', text: '【比赛演示资料】已经发送的原消息不能改写。', date: '2026-11-07T01:00:00Z' });
+    const raw = JSON.stringify(f.server.appStateSchema.parse(old));
+    f.sqlite.prepare('UPDATE user_states SET state_json = ?, revision = ? WHERE user_id = ?').run(raw, 7, 'alice');
+
+    const view = await f.server.loadState('alice');
+    assert.equal(view.revision, 7);
+    assert.equal(view.state.products[0].description, '现磨咖啡，可选热饮或冰饮。');
+    assert.equal(view.state.products[0].stock, 80);
+    assert.equal(view.state.products[0].restockThreshold, 5);
+    assert.deepEqual(view.state.products[1], old.products[1]);
+    assert.equal(Object.hasOwn(view.state.products[1], 'stock'), false);
+    assert.equal(view.state.products[2].stock, null);
+    assert.equal(view.state.products[2].restockThreshold, 0);
+    assert.equal(view.state.products[3].stock, 17);
+    assert.equal(view.state.products[3].restockThreshold, 3);
+    assert.equal(view.state.replySettings.storeInfo.contactName, '林青禾');
+    assert.equal(view.state.replySettings.storeInfo.phone, '');
+    assert.equal(view.state.replySettings.storeInfo.address, '青禾市拾光路18号');
+    assert.ok(!view.state.replySettings.storeInfo.serviceContent.includes('比赛演示'));
+    assert.ok(!view.state.replySettings.welcomeMessage.includes('演示'));
+    for (const field of ['customers', 'orders', 'tasks', 'imports']) assert.deepEqual(view.state[field], old[field]);
+    const unchanged = f.sqlite.prepare('SELECT state_json, revision FROM user_states WHERE user_id = ?').get('alice');
+    assert.equal(unchanged.state_json, raw);
+    assert.equal(unchanged.revision, 7);
+
+    assert.deepEqual(await f.server.loadState('alice'), view);
+    await f.server.saveState('alice', view.state, view.revision);
+    const persisted = f.sqlite.prepare('SELECT state_json, revision FROM user_states WHERE user_id = ?').get('alice');
+    assert.deepEqual(JSON.parse(persisted.state_json), view.state);
+    assert.equal(persisted.revision, 8);
+    assert.deepEqual((await f.server.loadState('alice')).state, view.state);
+  } finally { f.close(); }
+});
+
 test("客服回复必须引用门店真实资料，只返回建议且不写订单或状态", async (t) => {
   const f = fixture();
   try {
@@ -947,8 +998,12 @@ test("直接填写的店铺电话地址服务内容可作为真实回复依据�
   const f = fixture();
   try {
     const input = await replyFixture(f), current = await f.server.loadState("alice");
-    current.state.replySettings.storeInfo = { phone: "010-55550000", address: "测试路88号", serviceContent: "提供预约体验，基础体验129元。" };
-    current.state.products[0].needsRestock = true;
+    current.state.replySettings.storeInfo = { contactName: "合成店长", phone: "010-55550000", address: "测试路88号", serviceContent: "提供预约体验，基础体验129元。" };
+    current.state.products[0].needsRestock = false;
+    current.state.products[0].stock = 0;
+    current.state.products[0].restockThreshold = 5;
+    current.state.products.push({ ...current.state.products[0], id: 'stock-unknown', stock: null });
+    current.state.products.push({ ...current.state.products[0], id: 'service-with-unused-stock', type: 'service', stock: 0, needsRestock: true });
     current.state.exports = [{ id: "export-fixture", fileName: "合成导出.json", date: "2026-11-07T01:00:00Z", kind: "json", customerCount: current.state.customers.length, messageCount: 0 }];
     await f.server.saveState("alice", f.server.appStateSchema.parse(current.state), current.revision);
     let knowledge;
@@ -959,10 +1014,16 @@ test("直接填写的店铺电话地址服务内容可作为真实回复依据�
     const result = await f.server.runReplyAI("alice", input);
     assert.equal(result.action, "reply");
     assert.ok(knowledge.some(source => source.sourceId === "store:services" && source.text.includes("129元")));
+    assert.ok(knowledge.some(source => source.sourceId === "store:contact" && source.text === "店铺联系人：合成店长"));
     assert.ok(knowledge.some(source => source.sourceId === "product:p-coffee" && source.text.includes("待补货")));
+    assert.ok(knowledge.some(source => source.sourceId === "product:p-coffee" && source.text.includes("库存量：0")));
+    assert.ok(knowledge.some(source => source.sourceId === "product:stock-unknown" && source.text.includes("库存量：未提供，需人工确认") && !source.text.includes("待补货")));
+    assert.ok(knowledge.some(source => source.sourceId === "product:service-with-unused-stock" && !source.text.includes("库存量") && !source.text.includes("待补货")));
     const saved = await f.server.loadState("alice");
     assert.deepEqual(saved.state.replySettings.storeInfo, current.state.replySettings.storeInfo);
-    assert.equal(saved.state.products[0].needsRestock, true);
+    assert.equal(saved.state.products[0].needsRestock, false);
+    assert.equal(saved.state.products[0].stock, 0);
+    assert.equal(saved.state.products[0].restockThreshold, 5);
     assert.equal(saved.state.exports[0].fileName, "合成导出.json");
   } finally { f.close(); }
 });

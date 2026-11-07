@@ -7,6 +7,7 @@ import { userSecrets, userStates } from "@/db/schema";
 import { demoSeed } from "@/lib/seed";
 import type { AIResult, AppState, ReplyResult, Settings } from "@/lib/types";
 import { assessReplyContext, CLARIFY_REPLY } from '@/lib/reply-context';
+import { migrateCompetitionCatalog } from '@/lib/competition-demo';
 
 const MAX_STATE_BYTES = 1_500_000;
 const MAX_MESSAGES = 12_000;
@@ -54,13 +55,13 @@ export const aiSettingsSchema = z.object({
 }).strict();
 
 const faqSchema = z.object({ question: z.string().min(1).max(500), answer: z.string().min(1).max(4000) }).strict();
-export const productSchema = z.object({ id, name: z.string().min(1).max(160), type: z.enum(["product", "service"]), price: z.number().finite().min(0).max(100_000_000).nullable(), description: z.string().max(8000), faq: z.array(faqSchema).max(30), enabled: z.boolean(), needsRestock: z.boolean().optional(), source: z.enum(['demo', 'manual']).optional() }).strict();
+export const productSchema = z.object({ id, name: z.string().min(1).max(160), type: z.enum(["product", "service"]), price: z.number().finite().min(0).max(100_000_000).nullable(), stock: z.number().int().min(0).max(1_000_000_000).nullable().optional(), restockThreshold: z.number().int().min(0).max(1_000_000_000).optional(), description: z.string().max(8000), faq: z.array(faqSchema).max(30), enabled: z.boolean(), needsRestock: z.boolean().optional(), source: z.enum(['demo', 'manual']).optional() }).strict();
 const clockSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const replySettingsSchema = z.object({
   enabled: z.boolean(), mode: z.enum(["review", "auto"]), selectedCustomerIds: z.array(id).max(500), autoEnrollNewContacts: z.boolean().default(true),
   welcomeEnabled: z.boolean().default(true), welcomeMessage: z.string().max(300).refine(value => !value.includes('\0'), '欢迎语不能包含空字符').default('您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。'),
   businessHours: z.object({ enabled: z.boolean(), start: clockSchema, end: clockSchema, days: z.array(z.number().int().min(0).max(6)).max(7) }).strict(),
-  storeInfo: z.object({ phone: z.string().max(80), address: z.string().max(500), serviceContent: z.string().max(2000) }).strict().optional(),
+  storeInfo: z.object({ contactName: z.string().max(80).optional(), phone: z.string().max(80), address: z.string().max(500), serviceContent: z.string().max(2000) }).strict().optional(),
   faq: z.array(faqSchema).max(100), handoffKeywords: z.array(z.string().min(1).max(80)).max(100),
   maxReplyChars: z.number().int().min(40).max(1000), cooldownSeconds: z.number().int().min(0).max(3600), debounceSeconds: z.number().int().min(0).max(3600).default(10), prompt: z.string().max(8000),
 }).strict();
@@ -202,7 +203,7 @@ function parseSavedState(stateJson: string): AppState {
   catch { throw new ApiError(503, "已保存的数据格式异常，请联系管理员，原数据未被覆盖。"); }
   const parsed = appStateSchema.safeParse(raw);
   if (!parsed.success) throw new ApiError(503, "已保存的数据格式异常，请联系管理员，原数据未被覆盖。");
-  return parsed.data;
+  return migrateCompetitionCatalog(parsed.data);
 }
 
 export async function loadState(userId: string, workspace?: LocalWorkspace): Promise<{ state: AppState; revision: number }> {
@@ -477,13 +478,16 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   const intent = assessReplyContext(incomingMessages, conversation, (state.products || []).filter(product => product.enabled).map(product => product.name));
   if (intent === 'ignore') return { action: 'ignore', reply: '', reason: '结合最近对话，当前消息是招呼、确认或无具体问题的标点，无需再次介绍或报价。', productIds: [] };
   if (intent === 'clarify') return { action: 'clarify', reply: CLARIFY_REPLY, reason: '当前消息的商品指代或咨询内容尚不明确，先询问具体需求。', productIds: [] };
+  if (settings.storeInfo?.contactName?.trim()) sources.push({ id: 'store:contact', text: `店铺联系人：${settings.storeInfo.contactName}` });
   if (settings.storeInfo?.phone.trim()) sources.push({ id: 'store:phone', text: `店铺电话：${settings.storeInfo.phone}` });
   if (settings.storeInfo?.address.trim()) sources.push({ id: 'store:address', text: `店铺地址：${settings.storeInfo.address}` });
   if (settings.storeInfo?.serviceContent.trim()) sources.push({ id: 'store:services', text: `服务内容：${settings.storeInfo.serviceContent}` });
   for (const [index, faq] of settings.faq.entries()) sources.push({ id: `faq:${index}`, text: `${faq.question}\n${faq.answer}` });
   const products = (state.products || []).filter((product) => product.enabled);
   for (const product of products) {
-    sources.push({ id: `product:${product.id}`, productId: product.id, text: `${product.type === "service" ? "服务" : "商品"}：${product.name}\n价格：${product.price === null ? "未提供，需人工确认" : `${product.price}元`}\n${product.description}${product.type === 'product' && product.needsRestock ? '\n补货状态：待补货，库存需人工确认。' : ''}` });
+    // 库存留空表示尚未填写；服务不使用库存，低库存也不等同于已经售罄。
+    const inventory = product.type === 'product' ? `\n库存量：${product.stock == null ? '未提供，需人工确认' : product.stock}${product.needsRestock === true || product.stock != null && product.stock <= (product.restockThreshold ?? 5) ? '\n补货状态：待补货。' : ''}` : '';
+    sources.push({ id: `product:${product.id}`, productId: product.id, text: `${product.type === "service" ? "服务" : "商品"}：${product.name}\n价格：${product.price === null ? "未提供，需人工确认" : `${product.price}元`}\n${product.description}${inventory}` });
     for (const [index, faq] of product.faq.entries()) sources.push({ id: `product:${product.id}:faq:${index}`, productId: product.id, text: `${faq.question}\n${faq.answer}` });
   }
   if (settings.businessHours.enabled || settings.storeInfo) sources.push({ id: "hours", text: `营业时间（北京时间）：每周${settings.businessHours.days.map((day) => ["日", "一", "二", "三", "四", "五", "六"][day]).join("、")} ${settings.businessHours.start}至${settings.businessHours.end}。` });

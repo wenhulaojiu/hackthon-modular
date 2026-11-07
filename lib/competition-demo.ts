@@ -1,7 +1,42 @@
 import type { AppState, Customer, Order, Product, ReplySettings, Task } from './types.ts';
 
 const PREFIX = 'competition-';
-export const DEMO_WELCOME = '你好，欢迎来到青禾生活馆！这是比赛演示店铺，提供现磨咖啡、每日烘焙、鲜花与生活礼品，也有咖啡体验、花艺体验和礼品包装服务。演示营业时间为每天09:00–21:00，欢迎直接留言咨询商品或服务。';
+export const DEMO_WELCOME = '你好，欢迎来到青禾生活馆！这里提供现磨咖啡、每日烘焙、鲜花与生活礼品，也有咖啡体验、花艺体验和礼品包装服务。营业时间为每天09:00–21:00，欢迎直接留言咨询商品或服务。';
+const LEGACY_DEMO_WELCOME = '你好，欢迎来到青禾生活馆！这是比赛演示店铺，提供现磨咖啡、每日烘焙、鲜花与生活礼品，也有咖啡体验、花艺体验和礼品包装服务。演示营业时间为每天09:00–21:00，欢迎直接留言咨询商品或服务。';
+const STORE_SERVICE_CONTENT = '现磨咖啡、每日烘焙、鲜花与生活礼品；提供咖啡体验、花艺体验和礼品包装。';
+const CATALOG_STOCK = [80, 60, 45, 38, 30, 28, 18, 24, 40, 2, 22, 0, 16, 35, 3, 12];
+const CATALOG_NAMES = ['美式咖啡', '燕麦拿铁', '桂花拿铁', '柠檬冷萃', '原味可颂', '海盐贝果', '巴斯克蛋糕', '燕麦曲奇', '季节水果茶', '花草茶包', '手冲咖啡豆', '挂耳咖啡礼盒', '手作香氛蜡烛', '帆布手提袋', '鲜花小束', '生活礼品套装'];
+
+// 仅整理已知虚拟资料；保留来源标记、人工修改及所有历史消息。
+export function migrateCompetitionCatalog(previous: AppState): AppState {
+  const products = previous.products?.map(product => {
+    if (product.source !== 'demo') return product;
+    const description = product.description.replace(/^【比赛演示资料】\s*/, '');
+    const index = CATALOG_NAMES.indexOf(product.name);
+    const stock = product.type === 'product' && index >= 0 && product.stock === undefined ? CATALOG_STOCK[index] : product.stock;
+    const restockThreshold = product.type === 'product' && index >= 0 && product.restockThreshold === undefined ? 5 : product.restockThreshold;
+    if (description === product.description && stock === product.stock && restockThreshold === product.restockThreshold) return product;
+    return { ...product, description, ...(stock !== undefined ? { stock } : {}), ...(restockThreshold !== undefined ? { restockThreshold } : {}) };
+  });
+  const settings = previous.replySettings;
+  let replySettings = settings;
+  if (settings) {
+    const info = settings.storeInfo;
+    // 店铺字段只替换完整旧模板，不清洗任意商家的自填文本。
+    const isKnownStore = previous.settings.storeName === '青禾生活馆' && previous.products?.some(product => product.source === 'demo');
+    const storeInfo = info && isKnownStore ? {
+      ...info,
+      ...(info.phone === '演示电话（未开放）' ? { phone: '' } : {}),
+      ...(info.address === '青禾市拾光路18号（虚构地址）' ? { address: '青禾市拾光路18号' } : {}),
+      ...(info.serviceContent === `比赛演示店铺：${STORE_SERVICE_CONTENT}` ? { serviceContent: STORE_SERVICE_CONTENT } : {}),
+      ...(info.contactName === undefined && (info.phone === '演示电话（未开放）' || info.address === '青禾市拾光路18号（虚构地址）' || info.serviceContent === `比赛演示店铺：${STORE_SERVICE_CONTENT}`) ? { contactName: '林青禾' } : {}),
+    } : info;
+    const welcomeMessage = isKnownStore && settings.welcomeMessage === LEGACY_DEMO_WELCOME ? DEMO_WELCOME : settings.welcomeMessage;
+    if (welcomeMessage !== settings.welcomeMessage || (storeInfo && JSON.stringify(storeInfo) !== JSON.stringify(info))) replySettings = { ...settings, storeInfo, welcomeMessage };
+  }
+  if (replySettings === settings && (!products || products.every((product, index) => product === previous.products![index]))) return previous;
+  return { ...previous, ...(products ? { products } : {}), ...(replySettings ? { replySettings } : {}) };
+}
 
 export function createCompetitionDemo(previous: AppState, now = new Date()): AppState {
   const removedDemoIds = new Set(previous.customers.filter(customer => customer.source === 'demo').map(customer => customer.id));
@@ -30,7 +65,7 @@ export function createCompetitionDemo(previous: AppState, now = new Date()): App
     ['礼品包装',15,'service','每份基础礼品包装，不含礼品本身。'],['鲜花定制',199,'service','基础方案199元起；改配花材和最终金额需人工确认。'],
     ['小型茶歇布置',599,'service','基础方案含十人份饮品与点心；额外需求需人工确认。'],['门店空间体验',88,'service','双人两小时，含两杯美式咖啡，需提前确认空位。'],
   ];
-  const products: Product[] = catalog.map(([name, price, type, description], index) => ({ id: takeId(`${PREFIX}product-${index+1}`,productIds), source: 'demo', name, price, type, description: `【比赛演示资料】${description}`, enabled: true, needsRestock: type === 'product' && [9, 11, 14].includes(index), faq: type === 'service' ? [{ question: '如何预约？', answer: '请至少提前一天通过微信留言预约，具体时段以人工确认为准。' }] : [{ question: '现在有货吗？', answer: '当日余量请通过微信咨询；标记待补货的商品需人工确认。' }] }));
+  const products: Product[] = catalog.map(([name, price, type, description], index) => ({ id: takeId(`${PREFIX}product-${index+1}`,productIds), source: 'demo', name, price, type, description, enabled: true, needsRestock: type === 'product' && [9, 11, 14].includes(index), ...(type === 'product' ? { stock: CATALOG_STOCK[index], restockThreshold: 5 } : {}), faq: type === 'service' ? [{ question: '如何预约？', answer: '请至少提前一天通过微信留言预约，具体时段以人工确认为准。' }] : [{ question: '现在有货吗？', answer: '当日余量请通过微信咨询；标记待补货的商品需人工确认。' }] }));
   const names = ['林悦','陈可','周晴','许安','沈宁','李沐','顾南','苏禾','王嘉','程雨','孟夏','叶青','孙然','赵一','宋溪','韩星','郑初','陆遥','何微','陶白','吴悠','冯乐','邵月','梁简','温栩','蒋宁','唐禾','夏可','方青','白露'];
   const colors = ['#6a8f38','#8a709c','#c38b45','#4a8b92','#6878a8'];
   const customers: Customer[] = names.map((name,index) => {
@@ -44,7 +79,7 @@ export function createCompetitionDemo(previous: AppState, now = new Date()): App
   for(let index=0;index<4;index++)orders.push({id:takeId(`${PREFIX}refund-${index}`,orderIds),customerId:customers[index].id,description:'演示退款',amount:products[index].price!,date:timestamp(index,14),status:'confirmed',type:'refund',evidence:'虚拟比赛演示退款，不代表真实交易。'});
   const tasks: Task[] = customers.slice(0,18).map((customer,index) => ({id:takeId(`${PREFIX}task-${index}`,taskIds),customerId:customer.id,title:['了解体验感受','确认礼品偏好','提醒预约安排'][index%3],date:timestamp(2-index%7,11),kind:(['followup','marketing','reminder'] as const)[index%3],status:'todo',priority:index%4===0?'high':'normal',script:`您好，上次您咨询了${products[index%products.length].name}，这次需要我继续为您介绍吗？` }));
   const base: ReplySettings = previous.replySettings || { enabled:false,mode:'review',selectedCustomerIds:[],businessHours:{enabled:false,start:'09:00',end:'21:00',days:[0,1,2,3,4,5,6]},faq:[],handoffKeywords:['退款','投诉','人工客服'],maxReplyChars:300,cooldownSeconds:30,debounceSeconds:10,prompt:'只根据已保存的店铺资料回复，不清楚时转人工。' };
-  const next: AppState = {...previous,demo:false,customers:[...retainedCustomers,...customers],orders:[...retainedOrders,...orders],tasks:[...retainedTasks,...tasks],settings:{...previous.settings,storeName:'青禾生活馆',industry:'生活方式零售'},products:[...retainedProducts,...products],replySettings:{...base,debounceSeconds:base.debounceSeconds??10,selectedCustomerIds:base.selectedCustomerIds.filter(id=>retainedCustomers.some(customer=>customer.id===id)),autoEnrollNewContacts:true,welcomeEnabled:true,welcomeMessage:DEMO_WELCOME,businessHours:{enabled:false,start:'09:00',end:'21:00',days:[0,1,2,3,4,5,6]},storeInfo:{phone:'演示电话（未开放）',address:'青禾市拾光路18号（虚构地址）',serviceContent:'比赛演示店铺：现磨咖啡、每日烘焙、鲜花与生活礼品；提供咖啡体验、花艺体验和礼品包装。'}}};
+  const next: AppState = {...previous,demo:false,customers:[...retainedCustomers,...customers],orders:[...retainedOrders,...orders],tasks:[...retainedTasks,...tasks],settings:{...previous.settings,storeName:'青禾生活馆',industry:'生活方式零售'},products:[...retainedProducts,...products],replySettings:{...base,debounceSeconds:base.debounceSeconds??10,selectedCustomerIds:base.selectedCustomerIds.filter(id=>retainedCustomers.some(customer=>customer.id===id)),autoEnrollNewContacts:true,welcomeEnabled:true,welcomeMessage:DEMO_WELCOME,businessHours:{enabled:false,start:'09:00',end:'21:00',days:[0,1,2,3,4,5,6]},storeInfo:{contactName:'林青禾',phone:'',address:'青禾市拾光路18号',serviceContent:STORE_SERVICE_CONTENT}}};
   if (next.customers.reduce((sum,customer)=>sum+customer.messages.length,0) > 12000 || new TextEncoder().encode(JSON.stringify(next)).length > 1_450_000) throw new Error('加入演示资料后会超过消息或数据容量，现有资料未修改。');
   return next;
 }

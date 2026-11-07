@@ -43,7 +43,7 @@ function customerData(customer: Customer): Customer {
 }
 
 function productData(product: Product): Product {
-  return { id: product.id, name: product.name, type: product.type, price: product.price, description: product.description, faq: faqData(product.faq), enabled: product.enabled, ...(product.needsRestock === undefined ? {} : { needsRestock: product.needsRestock }), ...(product.source === undefined ? {} : { source: product.source }) };
+  return { id: product.id, name: product.name, type: product.type, price: product.price, ...(product.stock === undefined ? {} : { stock: product.stock }), ...(product.restockThreshold === undefined ? {} : { restockThreshold: product.restockThreshold }), description: product.description, faq: faqData(product.faq), enabled: product.enabled, ...(product.needsRestock === undefined ? {} : { needsRestock: product.needsRestock }), ...(product.source === undefined ? {} : { source: product.source }) };
 }
 
 function replySettingsData(settings: ReplySettings): ReplySettings {
@@ -52,7 +52,7 @@ function replySettingsData(settings: ReplySettings): ReplySettings {
     autoEnrollNewContacts: settings.autoEnrollNewContacts ?? true,
     welcomeEnabled: settings.welcomeEnabled ?? true,
     welcomeMessage: settings.welcomeMessage ?? '您好，欢迎添加本店！这里可以咨询商品和服务，欢迎告诉我们您的需求。',
-    ...(settings.storeInfo ? { storeInfo: { phone: settings.storeInfo.phone, address: settings.storeInfo.address, serviceContent: settings.storeInfo.serviceContent } } : {}),
+    ...(settings.storeInfo ? { storeInfo: { ...(settings.storeInfo.contactName === undefined ? {} : { contactName: settings.storeInfo.contactName }), phone: settings.storeInfo.phone, address: settings.storeInfo.address, serviceContent: settings.storeInfo.serviceContent } } : {}),
     businessHours: { enabled: settings.businessHours.enabled, start: settings.businessHours.start, end: settings.businessHours.end, days: [...settings.businessHours.days] },
     faq: faqData(settings.faq), handoffKeywords: [...settings.handoffKeywords], maxReplyChars: settings.maxReplyChars,
     cooldownSeconds: settings.cooldownSeconds, debounceSeconds: settings.debounceSeconds ?? 10, prompt: settings.prompt,

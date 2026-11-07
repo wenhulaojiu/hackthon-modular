@@ -25,3 +25,13 @@
 .reply-store-welcome-actions > span { color: var(--kexu-muted); font-size: 11px; white-space: nowrap; }
 .reply-store-welcome > p.reply-store-welcome-error { color: #a46b4a; }
 @media (max-width: 720px) { .reply-product-actions .btn { font-size: 12px; } }
+
+.reply-product-tools { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.reply-product-sort { width: 148px; min-width: 130px; font-size: 12px; padding: 7px 9px; }
+.reply-product-stock { margin: 9px 0 0; color: var(--kexu-muted); font-size: 12px; }
+.reply-product-stock-fields small { color: var(--kexu-muted); font-size: 11px; line-height: 1.6; }
+.reply-knowledge-page .reply-product-toolbar { flex-wrap: wrap; gap: 8px 14px; padding-bottom: 12px; }
+.reply-knowledge-page .reply-product-toolbar .tabs { flex-wrap: wrap; gap: 18px; }
+.reply-knowledge-page .reply-product-tools { flex: 1 0 100%; justify-content: space-between; }
+.reply-knowledge-page .reply-product-tools .reply-search { flex: 0 1 230px; }
+@media (max-width: 720px) { .reply-knowledge-page .reply-product-tools { flex-wrap: wrap; } .reply-knowledge-page .reply-product-tools .reply-search { flex: 1 1 140px; } .reply-product-sort { max-width: 100%; } }

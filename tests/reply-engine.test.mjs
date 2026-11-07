@@ -659,9 +659,34 @@ test("连续批次容量超限时保留全部原文证据并转人工，不截�
 
 test("店铺基础信息和待补货标记在引擎同步后保留，服务内容金额可核对", async (t) => {
   const { engine } = await fixture(t, { generate: async () => ({ action: "reply", reply: "基础体验129元。", reason: "已配置的服务内容。", productIds: [] }), send: async () => ({ status: "sent", messageId: "123456" }) });
-  const current = config();current.settings.storeInfo = { phone: "010-55550000", address: "合成路88号", serviceContent: "基础体验129元。" };current.products[0].needsRestock = true;
+  const current = config();current.settings.storeInfo = { contactName: "合成店长", phone: "010-55550000", address: "合成路88号", serviceContent: "基础体验129元。" };current.products[0].needsRestock = true;current.products[0].stock = 0;current.products[0].restockThreshold = 5;
   await engine.syncConfig(current);
-  const saved = await engine.getConfig();assert.deepEqual(saved.settings.storeInfo, current.settings.storeInfo);assert.equal(saved.products[0].needsRestock, true);
+  const saved = await engine.getConfig();assert.deepEqual(saved.settings.storeInfo, current.settings.storeInfo);assert.deepEqual(saved.products, current.products);
   await engine.start();await engine.ingest(event("store-info-message"));
   const done = await until(engine, state => state.counts.sent === 1 || state.counts.handoff === 1);assert.equal(done.counts.sent, 1);
+});
+
+test("库存配置同步后新客增量接纳不丢字段，重启保留零和未知库存", async t => {
+  const { engine, create } = await fixture(t);
+  const current = config('review');
+  current.settings.storeInfo = { contactName: '合成联系人', phone: '', address: '', serviceContent: '' };
+  current.products = [{ ...current.products[0], stock: 0, restockThreshold: 0 }, { ...current.products[0], id: 'unknown', stock: null }, { ...current.products[0], id: 'legacy' }];
+  await engine.syncConfig(current); await engine.start();
+  assert.deepEqual(await engine.enrollCustomers(enrollment(current)), { configured: true, added: 1 });
+  assert.deepEqual((await engine.getConfig()).products, current.products);
+  assert.deepEqual((await engine.getConfig()).settings.storeInfo, current.settings.storeInfo);
+  await engine.close();
+  const restarted = await create();
+  assert.deepEqual((await restarted.getConfig()).products, current.products);
+  assert.deepEqual((await restarted.getConfig()).settings.storeInfo, current.settings.storeInfo);
+});
+
+test("本机配置与保存校验一致拒绝非法库存与联系人", async t => {
+  const { engine } = await fixture(t);
+  for (const field of ['stock', 'restockThreshold']) for (const value of [-1, 0.5, 1_000_000_001, '1', NaN]) {
+    const current = config(); current.products[0][field] = value;
+    await assert.rejects(() => engine.syncConfig(current), /库存/);
+  }
+  const invalid = config(); invalid.settings.storeInfo = { contactName: '人'.repeat(81), phone: '', address: '', serviceContent: '' };
+  await assert.rejects(() => engine.syncConfig(invalid), /店铺基础信息/);
 });

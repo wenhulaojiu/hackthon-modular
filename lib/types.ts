@@ -23,11 +23,11 @@ export type Settings = {
 export type ImportRecord = { id: string; fileName: string; date: string; customerCount: number; messageCount: number };
 export type ExportRecord = { id: string; fileName: string; date: string; kind: 'json' | 'customers' | 'orders' | 'tasks'; customerCount: number; messageCount: number };
 export type FAQ = { question: string; answer: string };
-export type Product = { id: string; name: string; type: 'product' | 'service'; price: number | null; description: string; faq: FAQ[]; enabled: boolean; needsRestock?: boolean; source?: 'demo' | 'manual' };
+export type Product = { id: string; name: string; type: 'product' | 'service'; price: number | null; stock?: number | null; restockThreshold?: number; description: string; faq: FAQ[]; enabled: boolean; needsRestock?: boolean; source?: 'demo' | 'manual' };
 export type ReplySettings = {
   enabled: boolean; mode: 'review' | 'auto'; selectedCustomerIds: string[]; autoEnrollNewContacts?: boolean;
   businessHours: { enabled: boolean; start: string; end: string; days: number[] };
-  storeInfo?: { phone: string; address: string; serviceContent: string };
+  storeInfo?: { contactName?: string; phone: string; address: string; serviceContent: string };
   welcomeEnabled?: boolean; welcomeMessage?: string;
   faq: FAQ[]; handoffKeywords: string[]; maxReplyChars: number; cooldownSeconds: number; debounceSeconds?: number; prompt: string;
 };

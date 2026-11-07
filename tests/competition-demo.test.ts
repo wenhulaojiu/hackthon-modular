@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createCompetitionDemo, DEMO_WELCOME } from '../lib/competition-demo.ts';
+import { createCompetitionDemo, DEMO_WELCOME, migrateCompetitionCatalog } from '../lib/competition-demo.ts';
 import type { AppState, Customer, Product } from '../lib/types.ts';
 
 const now = new Date('2026-11-07T06:00:00.000Z');
@@ -98,7 +98,7 @@ test('30位虚拟客户明确标记并排除接待，欢迎语不超过300字符
   assert.equal(result.replySettings?.welcomeMessage, DEMO_WELCOME);
   assert.ok(DEMO_WELCOME.length > 0 && DEMO_WELCOME.length <= 300);
   assert.equal(DEMO_WELCOME.includes('\0'), false);
-  assert.match(DEMO_WELCOME, /比赛演示店铺/);
+  assert.doesNotMatch(DEMO_WELCOME, /演示|比赛/);
 });
 
 test('演示目录提供16商品和6服务，价格、说明与FAQ可以用于咨询', () => {
@@ -111,10 +111,18 @@ test('演示目录提供16商品和6服务，价格、说明与FAQ可以用于�
     assert.equal(item.source, 'demo');
     assert.equal(item.enabled, true);
     assert.ok(typeof item.price === 'number' && Number.isFinite(item.price) && item.price > 0);
-    assert.match(item.description, /比赛演示资料/);
+    assert.doesNotMatch(item.description, /比赛演示资料/);
     assert.ok(item.faq.length > 0);
     for (const faq of item.faq) assert.ok(faq.question.trim() && faq.answer.trim());
-    if (item.type === 'service') assert.equal(item.needsRestock, false);
+    if (item.type === 'service') {
+      assert.equal(item.needsRestock, false);
+      assert.equal(item.stock, undefined);
+      assert.equal(item.restockThreshold, undefined);
+    } else {
+      assert.ok(Number.isInteger(item.stock) && item.stock! >= 0);
+      assert.equal(item.restockThreshold, 5);
+      assert.equal(item.stock! <= item.restockThreshold!, item.needsRestock);
+    }
   }
   assert.equal(catalog.find(item => item.name === '美式咖啡')?.price, 18);
   assert.equal(catalog.find(item => item.name === '花艺体验')?.price, 168);
@@ -163,7 +171,49 @@ test('没有原回复规则时保持总开关关闭与审阅模式，生成店�
   assert.equal(result.replySettings?.autoEnrollNewContacts, true);
   assert.equal(result.replySettings?.welcomeEnabled, true);
   assert.equal(result.replySettings?.debounceSeconds, 10);
-  assert.match(result.replySettings?.storeInfo?.address || '', /虚构地址/);
+  assert.equal(result.replySettings?.storeInfo?.contactName, '林青禾');
+  assert.equal(result.replySettings?.storeInfo?.phone, '');
+  assert.equal(result.replySettings?.storeInfo?.address, '青禾市拾光路18号');
+  assert.doesNotMatch(result.replySettings?.storeInfo?.serviceContent || '', /演示|比赛/);
+});
+
+test('旧演示目录迁移只清理商品和完整旧模板，保留聊天及禁发隔离', () => {
+  const input = createCompetitionDemo(state(), now);
+  input.products = input.products!.map(item => item.source === 'demo' ? { ...item, stock: undefined, restockThreshold: undefined, description: `【比赛演示资料】${item.description}` } : item);
+  input.replySettings!.welcomeMessage = '你好，欢迎来到青禾生活馆！这是比赛演示店铺，提供现磨咖啡、每日烘焙、鲜花与生活礼品，也有咖啡体验、花艺体验和礼品包装服务。演示营业时间为每天09:00–21:00，欢迎直接留言咨询商品或服务。';
+  input.replySettings!.storeInfo = { phone: '演示电话（未开放）', address: '青禾市拾光路18号（虚构地址）', serviceContent: '比赛演示店铺：现磨咖啡、每日烘焙、鲜花与生活礼品；提供咖啡体验、花艺体验和礼品包装。' };
+  const before = structuredClone(input);
+  const result = migrateCompetitionCatalog(freeze(input));
+  assert.deepEqual(input, before);
+  assert.equal(result.customers, input.customers);
+  assert.equal(result.orders, input.orders);
+  assert.equal(result.tasks, input.tasks);
+  assert.equal(result.products![0], input.products![0]);
+  assert.equal(result.products!.filter(item => item.source === 'demo' && item.type === 'product' && item.stock! <= item.restockThreshold!).length, 3);
+  assert.ok(result.customers.filter(item => item.source === 'demo').every(item => item.autoReplyEnabled === false));
+  assert.ok(result.products!.every(item => !item.description.startsWith('【比赛演示资料】')));
+  assert.deepEqual(result.replySettings!.storeInfo, { contactName: '林青禾', phone: '', address: '青禾市拾光路18号', serviceContent: '现磨咖啡、每日烘焙、鲜花与生活礼品；提供咖啡体验、花艺体验和礼品包装。' });
+  assert.equal(result.replySettings!.welcomeMessage, DEMO_WELCOME);
+  assert.equal(migrateCompetitionCatalog(result), result);
+});
+
+test('目录迁移保留人工库存、未知库存、自填店铺资料与欢迎语', () => {
+  const input = createCompetitionDemo(state(), now);
+  const demos = input.products!.filter(item => item.source === 'demo');
+  demos[0].stock = 123;
+  demos[0].restockThreshold = 20;
+  demos[1].stock = null;
+  input.products![0].description = '【比赛演示资料】人工商品说明需保留';
+  input.replySettings!.welcomeMessage = '你好，这是人工欢迎语。比赛演示资料也属于人工文本。';
+  input.replySettings!.storeInfo = { contactName: '人工联系人', phone: '人工电话', address: '人工地址', serviceContent: '我的比赛演示店铺：保留手动说明' };
+  const result = migrateCompetitionCatalog(freeze(input));
+  assert.equal(result, input);
+  assert.equal(result.products!.find(item => item.id === demos[0].id)!.stock, 123);
+  assert.equal(result.products!.find(item => item.id === demos[1].id)!.stock, null);
+  assert.equal(result.products![0].description, '【比赛演示资料】人工商品说明需保留');
+  const withoutContact = structuredClone(input);
+  delete withoutContact.replySettings!.storeInfo!.contactName;
+  assert.equal(migrateCompetitionCatalog(withoutContact), withoutContact);
 });
 
 test('旧规则未设置等待时补10秒，已保存60秒不被演示加载覆盖', () => {

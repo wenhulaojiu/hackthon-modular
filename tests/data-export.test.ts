@@ -60,6 +60,24 @@ test('完整JSON保留聊天画像业务资料，白名单排除所有对象额�
   assert.equal(JSON.stringify(extra), before);
 });
 
+test('完整JSON导出保留联系人和库存，未填写库存不会变为零且额外凭据被过滤', () => {
+  const state = demoSeed();
+  const product = { id: 'stock-known', name: '合成商品', type: 'product' as const, price: 18, description: '库存契约测试', enabled: true, faq: [] };
+  state.products = [{ ...product, stock: 0, restockThreshold: 0 }, { ...product, id: 'stock-unknown', stock: null }, { ...product, id: 'stock-legacy' }];
+  state.replySettings = { enabled: false, mode: 'review', selectedCustomerIds: [], businessHours: { enabled: false, start: '09:00', end: '18:00', days: [1] }, faq: [], handoffKeywords: [], maxReplyChars: 300, cooldownSeconds: 30, prompt: '', storeInfo: { contactName: '合成联系人', phone: '', address: '', serviceContent: '' } };
+  (state.replySettings.storeInfo as unknown as Record<string, unknown>).apiKey = 'SYNTHETIC_SECRET_NEVER_EXPORT';
+  (state.products[0] as unknown as Record<string, unknown>).token = 'SYNTHETIC_SECRET_NEVER_EXPORT';
+  const result = buildFullDataJson(state);
+  const exported = JSON.parse(result);
+  assert.equal(exported.products[0].stock, 0);
+  assert.equal(exported.products[0].restockThreshold, 0);
+  assert.equal(exported.products[1].stock, null);
+  assert.equal(Object.hasOwn(exported.products[2], 'stock'), false);
+  assert.equal(Object.hasOwn(exported.products[2], 'restockThreshold'), false);
+  assert.equal(exported.replySettings.storeInfo.contactName, '合成联系人');
+  assert.ok(!result.includes('SYNTHETIC_SECRET_NEVER_EXPORT'));
+});
+
 test('消费和客户导出按确认销售与退款计算，任务保留话术和日期', () => {
   const state = demoSeed();
   state.customers = [state.customers[0]];
