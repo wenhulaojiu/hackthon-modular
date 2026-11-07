@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Database, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Store, Trash2, Unplug } from 'lucide-react';
 import type { Settings as StoreSettings, SettingsProps } from '../../lib/types';
 import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from './reply-ui';
+import { assertWorkspaceCurrent, captureWorkspace, subscribeWorkspaceInvalidation } from '../../lib/client-workspace';
 
 const DEFAULT_PROMPTS = {
   profilePrompt: '你是商家的客户洞察助手。请根据提供的客户聊天记录生成有证据支持的客户画像。只使用聊天中明确提及的信息，不要猜测职业、收入、健康或其他敏感属性。信息不足时标记为未知。返回 JSON：summary（客户概况）、tags（需求及偏好标签数组）、preferences（产品与服务偏好）、budget（明确表达的预算或消费习惯）。',
@@ -29,6 +30,7 @@ export default function Settings({ state, onChange, notify, onAI, hasApiKey, onS
   const [testMessage, setTestMessage] = useState('');
   const savedRef = useRef(JSON.stringify(state.settings));
   const stateRef = useRef(state); stateRef.current = state;
+  useEffect(() => subscribeWorkspaceInvalidation(message => { setApiKey(''); setShowKey(false); setRemoveKey(false); setSaving(false); setTesting(false); setTestResult(null); setTestMessage(message); }), []);
   useEffect(() => {
     const serialized = JSON.stringify(state.settings);
     if (serialized !== savedRef.current) { savedRef.current = serialized; setDraft(structuredClone(state.settings)); }
@@ -46,10 +48,11 @@ export default function Settings({ state, onChange, notify, onAI, hasApiKey, onS
     try { const parsed = new URL(draft.ai.baseUrl); if (parsed.protocol !== 'https:') throw new Error(); } catch { notify('API 地址必须是有效的 HTTPS 地址', true); return false; }
     setSaving(true);
     try {
+      const expected = captureWorkspace();
       if (removeKey) await onSaveKey('', true);
       else if (apiKey.trim()) await onSaveKey(apiKey.trim());
       const next = { ...draft, storeName: draft.storeName.trim(), industry: draft.industry.trim(), ai: { ...draft.ai, baseUrl: draft.ai.baseUrl.trim().replace(/\/$/, ''), model: draft.ai.model.trim() } };
-      if (!await onChange({ ...stateRef.current, settings: next })) return false; savedRef.current = JSON.stringify(next); setDraft(next); setApiKey(''); setRemoveKey(false); notify('设置已保存'); return true;
+      if (!await onChange({ ...stateRef.current, settings: next })) return false; assertWorkspaceCurrent(expected); savedRef.current = JSON.stringify(next); setDraft(next); setApiKey(''); setRemoveKey(false); notify('设置已保存'); return true;
     } catch (error) { notify(error instanceof Error ? error.message : '设置保存失败，请重试', true); return false; }
     finally { setSaving(false); }
   };
@@ -58,7 +61,7 @@ export default function Settings({ state, onChange, notify, onAI, hasApiKey, onS
     if (testing || saving) return;
     if (dirty) { notify('请先保存当前设置，再测试连接', true); return; }
     setTesting(true); setTestResult(null);
-    try { await onAI('test'); setTestResult('success'); setTestMessage('连接成功，模型已正常响应。'); notify('AI 连接测试成功'); }
+    try { const expected = captureWorkspace(); await onAI('test'); assertWorkspaceCurrent(expected); setTestResult('success'); setTestMessage('连接成功，模型已正常响应。'); notify('AI 连接测试成功'); }
     catch (error) { const message = error instanceof Error ? error.message : '连接失败，请检查 API 地址、模型和密钥'; setTestResult('error'); setTestMessage(message); notify(message, true); }
     finally { setTesting(false); }
   };

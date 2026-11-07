@@ -15,7 +15,7 @@ const { drizzle } = nativeRequire("drizzle-orm/d1");
 const origin = "http://127.0.0.1:3000";
 
 // 用真实 SQLite 与 Drizzle 执行生产 SQL，只替换 Cloudflare 绑定及已认证身份。
-function fixture() {
+function fixture(bindings = {}) {
   const sqlite = new DatabaseSync(":memory:");
   for (const filename of readdirSync(path.join(project, "drizzle")).filter((name) => name.endsWith(".sql")).sort()) {
     sqlite.exec(readFileSync(path.join(project, "drizzle", filename), "utf8"));
@@ -33,7 +33,7 @@ function fixture() {
     },
   };
   const identity = new AsyncLocalStorage();
-  const environment = { DB: d1, APP_ENCRYPTION_KEY: randomBytes(32).toString("base64") };
+  const environment = { DB: d1, APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"), ...bindings };
   const loaded = new Map();
   let schema;
   const load = (filename) => {
@@ -248,7 +248,7 @@ test("AI画像使用兼容接口与服务端Authorization，返回结构化画�
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://api.deepseek.com/chat/completions");
     assert.equal(calls[0].options.method, "POST");
-    assert.equal(calls[0].options.redirect, "error");
+    assert.equal(calls[0].options.redirect, "manual");
     assert.equal(calls[0].options.headers.Authorization, "Bearer sk-unit-only-0123456789");
     assert.ok(calls[0].options.signal instanceof AbortSignal);
     const body = JSON.parse(calls[0].options.body);
@@ -441,7 +441,7 @@ test("客服回复必须引用门店真实资料，只返回建议且不写订�
     assert.match(result.reply, /268元/);
     assert.equal(result.grounding, undefined);
     assert.match(call.messages[0].content, /不执行主动营销/);
-    assert.ok(JSON.parse(call.messages[1].content).knowledge.some((source) => source.id === "product:p-coffee"));
+    assert.ok(JSON.parse(call.messages[1].content).knowledge.some((source) => source.sourceId === "product:p-coffee" && source.productId === "p-coffee"));
     assert.deepEqual(await f.server.loadState("alice"), before);
   } finally { f.close(); }
 });
@@ -488,4 +488,340 @@ test("回复缺少真实依据、虚构价格或未知商品时转人工而不�
       assert.equal(reply.reply, "");
     }
   } finally { f.close(); }
+});
+
+async function serviceReplyFixture(f) {
+  const input = await replyFixture(f);
+  const loaded = await f.server.loadState("alice");
+  const serviceId = "verify-ai-p-2026-11-07T04-46-47-580Z-synthetic";
+  loaded.state.products = [{ id: serviceId, name: "基础清洁服务_合成验证", type: "service", price: 129, description: "包含表面清洁与整理。此条资料仅用于合成验证。", faq: [{ question: "服务价格是多少？", answer: "服务价格为129元。" }], enabled: true }];
+  loaded.state.replySettings.faq = [{ question: "基础清洁服务的价格是多少？", answer: "基础清洁服务价格129元，包含表面清洁与整理。" }];
+  await f.server.saveState("alice", loaded.state, loaded.revision);
+  return { input: { ...input, message: { ...input.message, text: "请问基础清洁服务包含什么，价格多少？" } }, serviceId };
+}
+
+test("服务与FAQ129元资料能生成有依据回复，模型明确收到资料标识、商品标识和可逐字复制的引用", async (t) => {
+  const f = fixture();
+  try {
+    const { input, serviceId } = await serviceReplyFixture(f);
+    const before = await f.server.loadState("alice");
+    let selected = "faq:0";
+    let selectedQuote = "基础清洁服务价格129元，包含表面清洁与整理。";
+    t.mock.method(globalThis, "fetch", async (_url, options) => {
+      const messages = JSON.parse(options.body).messages;
+      assert.match(messages[0].content, /sourceId必须逐字复制/);
+      assert.match(messages[0].content, /不能混用/);
+      assert.match(messages[0].content, /不概括、不拼接/);
+      const knowledge = JSON.parse(messages[1].content).knowledge;
+      const source = knowledge.find((item) => item.sourceId === selected);
+      assert.ok(source, "模型输入提供与输出同名的sourceId");
+      assert.ok(source.groundingQuotes.includes(selectedQuote), "模型可直接复制有效资料原文");
+      assert.ok(source.text.includes(selectedQuote), "可复制引用必须真实存在于该资料");
+      return modelResponse({ action: "reply", reply: "基础清洁服务价格129元，包含表面清洁与整理。", reason: "根据门店服务与FAQ资料。", productIds: source.productId ? [source.productId] : [], grounding: [{ sourceId: source.sourceId, quote: selectedQuote }] });
+    });
+    for (const [sourceId, quote] of [
+      ["faq:0", "基础清洁服务价格129元，包含表面清洁与整理。"],
+      [`product:${serviceId}`, "价格：129元"],
+      [`product:${serviceId}:faq:0`, "服务价格为129元。"],
+    ]) {
+      selected = sourceId; selectedQuote = quote;
+      const result = await f.server.runReplyAI("alice", input);
+      assert.equal(result.action, "reply");
+      assert.match(result.reply, /129元/);
+      assert.deepEqual(result.productIds, sourceId === "faq:0" ? [] : [serviceId]);
+      assert.equal(result.grounding, undefined);
+    }
+    assert.deepEqual(await f.server.loadState("alice"), before);
+  } finally { f.close(); }
+});
+
+test("引用辅助不放宽门禁，服务ID错用、改写拼接原文、串资料或虚构价格仍转人工", async (t) => {
+  const f = fixture();
+  try {
+    const { input, serviceId } = await serviceReplyFixture(f);
+    const before = await f.server.loadState("alice");
+    let selected;
+    t.mock.method(globalThis, "fetch", async () => modelResponse(selected));
+    const valid = { action: "reply", reply: "基础清洁服务价格129元，包含表面清洁与整理。", reason: "根据服务资料。", productIds: [serviceId], grounding: [{ sourceId: `product:${serviceId}:faq:0`, quote: "服务价格为129元。" }] };
+    for (const invalid of [
+      { ...valid, grounding: [] },
+      { ...valid, grounding: [{ sourceId: serviceId, quote: "服务价格为129元。" }] },
+      { ...valid, grounding: [{ sourceId: "faq:0", quote: "服务价格为129元。" }] },
+      { ...valid, grounding: [{ sourceId: "faq:0", quote: "清洁服务收费129元，提供清洁整理。" }] },
+      { ...valid, grounding: [{ sourceId: `product:${serviceId}`, quote: "基础清洁服务_合成验证价格：129元" }] },
+      { ...valid, grounding: [{ sourceId: `product:${serviceId}`, quote: "包含表面清洁与整理。免费上门。" }] },
+      { ...valid, productIds: [`product:${serviceId}`] },
+      { ...valid, reply: "基础清洁服务价格130元。" },
+    ]) {
+      selected = invalid;
+      const result = await f.server.runReplyAI("alice", input);
+      assert.equal(result.action, "handoff");
+      assert.equal(result.reply, "");
+    }
+    assert.deepEqual(await f.server.loadState("alice"), before);
+  } finally { f.close(); }
+});
+
+const accountA = "acct-aaaaaaaaaaaaaaaaaaaa";
+const accountB = "acct-bbbbbbbbbbbbbbbbbbbb";
+const localBindings = {
+  KEXU_LOCAL_MODE: "1",
+  KEXU_MODEL_BRIDGE_URL: `${origin}/__local-wechat/model-transport`,
+  KEXU_MODEL_BRIDGE_TOKEN: "a".repeat(64),
+};
+
+function workspaceHeaders(id = "legacy", revision = 1, expected = `${id}@${revision}`) {
+  return { "x-kexu-local-scope": id, "x-kexu-local-revision": String(revision), ...(expected === null ? {} : { "x-kexu-workspace": expected }) };
+}
+
+function getStateRequest(headers = {}) { return new Request(`${origin}/api/state`, { headers }); }
+
+test("云端忽略伪造的本地账号范围和期望令牌，维持原有数据及API协议", async () => {
+  const f = fixture();
+  try {
+    const headers = workspaceHeaders(accountA, 3, "forged-token");
+    const loaded = await f.asUser("alice", async () => (await f.stateRoute.GET(getStateRequest(headers))).json());
+    assert.equal(Object.hasOwn(loaded, "workspaceToken"), false);
+    assert.equal(loaded.state.demo, true);
+    assert.deepEqual(await f.server.loadState("alice", { id: accountB, revision: 1 }), await f.server.loadState("alice"));
+    const response = await f.asUser("alice", () => f.stateRoute.POST(post("state", { state: loaded.state, revision: loaded.revision }, headers)));
+    assert.equal(response.status, 200);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 1);
+    assert.equal((await f.asUser("alice", () => f.secretRoute.POST(post("secret", { remove: true }, headers)))).status, 200);
+  } finally { f.close(); }
+});
+
+test("本地状态必须有有效的权威账号请求头，GET可不带期望令牌且不回退写入旧账号", async () => {
+  const f = fixture(localBindings);
+  try {
+    assert.equal((await f.stateRoute.GET(getStateRequest(workspaceHeaders()))).status, 401);
+    for (const headers of [{}, workspaceHeaders("arbitrary-user"), workspaceHeaders(accountA, 0), workspaceHeaders(accountA, "01"), workspaceHeaders(accountA, "9007199254740992"), workspaceHeaders("acct-AAAAAAAAAAAAAAAAAAAA")]) {
+      const response = await f.asUser("alice", () => f.stateRoute.GET(getStateRequest(headers)));
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).code, "LOCAL_WORKSPACE_UNAVAILABLE");
+    }
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 0);
+    const response = await f.asUser("alice", () => f.stateRoute.GET(getStateRequest(workspaceHeaders(accountA, 2, null))));
+    assert.equal(response.status, 200);
+    const loaded = await response.json();
+    assert.equal(loaded.workspaceToken, `${accountA}@2`);
+    assert.equal(loaded.state.demo, false);
+    assert.deepEqual(loaded.state.customers, []);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 1);
+    assert.equal(f.sqlite.prepare("SELECT user_id FROM user_states").get().user_id, `alice:wechat:${accountA}`);
+  } finally { f.close(); }
+});
+
+test("微信账号分别保存业务快照，新账号只继承门店和模型设置，旧数据和共享密钥保留", async () => {
+  const f = fixture(localBindings);
+  try {
+    const legacy = await f.server.loadState("alice");
+    legacy.state.settings.storeName = "刚配置好的门店";
+    legacy.state.settings.ai = { ...legacy.state.settings.ai, baseUrl: "https://api.openai.com/v1", model: "shared-provider-model" };
+    legacy.state.products = [{ id: "legacy-product", name: "原账号商品", type: "product", price: 15, description: "原账号资料", faq: [], enabled: true }];
+    await f.server.saveState("alice", legacy.state, legacy.revision);
+    await f.server.storeKey("alice", "sk-unit-shared-local-key");
+    const preserved = await f.server.loadState("alice");
+    const scopeA = { id: accountA, revision: 1 };
+    const [a, concurrent] = await Promise.all([f.server.loadState("alice", scopeA), f.server.loadState("alice", scopeA)]);
+    assert.deepEqual(a, concurrent);
+    assert.deepEqual(a.state.settings, preserved.state.settings);
+    for (const key of ["customers", "orders", "tasks", "imports", "products"]) assert.deepEqual(a.state[key], []);
+    assert.equal(a.state.demo, false);
+    assert.equal(a.state.replySettings, undefined);
+    a.state.customers = [{ ...structuredClone(legacy.state.customers[0]), id: "account-a-customer", source: "wechat" }];
+    await f.server.saveState("alice", a.state, 0, scopeA);
+    const b = await f.server.loadState("alice", { id: accountB, revision: 2 });
+    assert.deepEqual(b.state.customers, []);
+    assert.deepEqual(await f.server.loadState("alice"), preserved);
+    assert.deepEqual(await f.server.loadState("alice", { id: "legacy", revision: 3 }), preserved);
+    const returnedA = await f.asUser("alice", async () => (await f.stateRoute.GET(getStateRequest(workspaceHeaders(accountA, 4, null)))).json());
+    assert.equal(returnedA.workspaceToken, `${accountA}@4`);
+    assert.equal(returnedA.state.customers[0].id, "account-a-customer");
+    assert.equal(returnedA.hasApiKey, true);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_secrets").get().count, 1);
+    assert.equal(f.sqlite.prepare("SELECT user_id FROM user_secrets").get().user_id, "alice");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 3);
+  } finally { f.close(); }
+});
+
+test("换号后四个POST均先拒绝旧页面或缺失令牌，模型、状态和共享密钥不会被操作", async (t) => {
+  const f = fixture(localBindings);
+  try {
+    const { state } = await f.server.loadState("alice");
+    await f.server.storeKey("alice", "sk-unit-shared-local-key");
+    const before = f.sqlite.prepare("SELECT * FROM user_secrets WHERE user_id = ?").get("alice");
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async () => { calls += 1; throw new Error("旧页面不得调用模型"); });
+    const cases = [
+      ["state", f.stateRoute, { state, revision: 0 }],
+      ["secret", f.secretRoute, { remove: true }],
+      ["ai", f.aiRoute, { action: "test" }],
+      ["reply", f.replyRoute, { customerId: state.customers[0].id, message: { id: "new-message", text: "请问商品价格", date: new Date().toISOString() } }],
+    ];
+    for (const expected of [null, `${accountA}@1`, `${accountB}@1`, `${accountB}@02`, `${accountB} @2`]) {
+      for (const [endpoint, route, body] of cases) {
+        const response = await f.asUser("alice", () => route.POST(post(endpoint, body, workspaceHeaders(accountB, 2, expected))));
+        assert.equal(response.status, 409, `${endpoint}: ${expected}`);
+        const error = await response.json();
+        assert.equal(error.code, "WORKSPACE_CHANGED");
+        assert.match(error.error, /微信账号已切换/);
+      }
+    }
+    assert.equal(calls, 0);
+    assert.deepEqual(f.sqlite.prepare("SELECT * FROM user_secrets WHERE user_id = ?").get("alice"), before);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 1);
+  } finally { f.close(); }
+});
+
+test("同一账号重新连接后旧版本令牌失效，正确令牌保存且D1并发冲突不混淆账号切换", async () => {
+  const f = fixture(localBindings);
+  try {
+    const loaded = await f.asUser("alice", async () => (await f.stateRoute.GET(getStateRequest(workspaceHeaders(accountA, 7, null)))).json());
+    const body = { state: loaded.state, revision: loaded.revision };
+    const stale = await f.asUser("alice", () => f.stateRoute.POST(post("state", body, workspaceHeaders(accountA, 7, `${accountA}@6`))));
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).code, "WORKSPACE_CHANGED");
+    const good = await f.asUser("alice", () => f.stateRoute.POST(post("state", body, workspaceHeaders(accountA, 7))));
+    assert.equal(good.status, 200);
+    assert.equal((await good.json()).revision, 1);
+    const conflict = await f.asUser("alice", () => f.stateRoute.POST(post("state", body, workspaceHeaders(accountA, 7))));
+    assert.equal(conflict.status, 409);
+    const error = await conflict.json();
+    assert.equal(error.revision, 1);
+    assert.equal(error.code, undefined);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_states").get().count, 1);
+  } finally { f.close(); }
+});
+
+test("本地AI和客服仅加载当前微信账号，使用共享密钥并通过受保护的本机桥请求模型", async (t) => {
+  const f = fixture(localBindings);
+  try {
+    const input = await replyFixture(f);
+    const legacy = await f.server.loadState("alice");
+    const scope = { id: accountA, revision: 2 };
+    const account = await f.server.loadState("alice", scope);
+    account.state.settings.ai.model = "current-account-model";
+    account.state.customers = [{ ...structuredClone(legacy.state.customers[0]), id: "current-only-customer", name: "当前账号客户" }];
+    account.state.products = legacy.state.products;
+    account.state.replySettings = { ...legacy.state.replySettings, selectedCustomerIds: ["current-only-customer"] };
+    await f.server.saveState("alice", account.state, 0, scope);
+    const calls = [];
+    let result = { summary: "当前账号客户的明确需求。" };
+    t.mock.method(globalThis, "fetch", async (url, options) => { calls.push({ url, options, body: JSON.parse(options.body) }); return modelResponse(result); });
+    const ai = await f.asUser("alice", () => f.aiRoute.POST(post("ai", { action: "profile", customerId: "current-only-customer" }, workspaceHeaders(accountA, 2))));
+    assert.equal(ai.status, 200);
+    assert.deepEqual(await ai.json(), result);
+    assert.equal(calls[0].url, localBindings.KEXU_MODEL_BRIDGE_URL);
+    assert.equal(calls[0].options.redirect, "manual");
+    assert.equal(calls[0].options.headers.Authorization, "Bearer sk-unit-only-0123456789");
+    assert.equal(calls[0].options.headers["X-Kexu-Model-Token"], localBindings.KEXU_MODEL_BRIDGE_TOKEN);
+    assert.equal(calls[0].options.headers["X-Kexu-Model-Url"], "https://api.deepseek.com/chat/completions");
+    assert.equal(calls[0].body.model, "current-account-model");
+    assert.equal(JSON.parse(calls[0].body.messages[1].content).customer.name, "当前账号客户");
+    result = { action: "reply", reply: "浅烘咖啡礼盒268元。", reason: "商品资料。", productIds: ["p-coffee"], grounding: [{ sourceId: "product:p-coffee", quote: "浅烘咖啡礼盒" }] };
+    const reply = await f.asUser("alice", () => f.replyRoute.POST(post("reply", { ...input, customerId: "current-only-customer" }, workspaceHeaders(accountA, 2))));
+    assert.equal(reply.status, 200);
+    assert.equal((await reply.json()).action, "reply");
+    assert.equal(calls.length, 2);
+    const oldCustomer = await f.asUser("alice", () => f.aiRoute.POST(post("ai", { action: "profile", customerId: input.customerId }, workspaceHeaders(accountA, 2))));
+    assert.equal(oldCustomer.status, 404);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(await f.server.loadState("alice"), legacy);
+    const secret = await f.asUser("alice", () => f.secretRoute.POST(post("secret", { apiKey: "sk-unit-shared-replacement" }, workspaceHeaders(accountA, 2))));
+    assert.equal(secret.status, 200);
+    const b = await f.asUser("alice", async () => (await f.stateRoute.GET(getStateRequest(workspaceHeaders(accountB, 3, null)))).json());
+    assert.equal(b.hasApiKey, true);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM user_secrets").get().count, 1);
+  } finally { f.close(); }
+});
+
+test("模型所有3xx都拒绝且只请求一次，绝不跟随Location转发密钥", async (t) => {
+  const f = fixture();
+  try {
+    await f.server.storeKey("alice", "sk-unit-only-0123456789");
+    let status = 301;
+    const calls = [];
+    t.mock.method(globalThis, "fetch", async (url, options) => { calls.push({ url, options }); return new Response(null, { status, headers: { Location: "https://untrusted.example/collect-key" } }); });
+    for (status of [300, 301, 302, 303, 304, 305, 307, 308, 399]) {
+      const before = calls.length;
+      await assert.rejects(() => f.server.runAI("alice", { action: "test" }), (error) => error.status === 502 && /重定向/.test(error.message));
+      assert.equal(calls.length, before + 1);
+      assert.equal(calls.at(-1).url, "https://api.deepseek.com/chat/completions");
+      assert.equal(calls.at(-1).options.redirect, "manual");
+    }
+  } finally { f.close(); }
+});
+
+test("本机模型桥只接受回环固定路径和服务端令牌，失败提示不暴露上游原始错误", async (t) => {
+  const f = fixture(localBindings);
+  try {
+    await f.server.storeKey("alice", "sk-unit-only-0123456789");
+    let reason = "proxy_unreachable";
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async () => { calls += 1; return new Response("private-upstream-error sk-unit-only-0123456789", { status: 502, headers: { "X-Kexu-Transport-Error": reason } }); });
+    const hints = { proxy_unreachable: /代理无法连接/, upstream_unreachable: /网络不可达/, tls: /证书校验失败/, config: /代理配置无效/, invalid_response: /不兼容或过大/, unexpected: /网络服务暂时不可用/ };
+    for (const [error, hint] of Object.entries(hints)) {
+      reason = error;
+      await assert.rejects(() => f.server.runAI("alice", { action: "test" }), (error) => error.status === 502 && hint.test(error.message) && !/private-upstream-error|sk-unit-only/.test(error.message));
+    }
+    const baseline = calls;
+    for (const url of ["https://proxy.example/__local-wechat/model-transport", "http://localhost:3000/__local-wechat/model-transport", `${origin}/wrong-path`, `${origin}/__local-wechat/model-transport?token=x`, ""]) {
+      f.environment.KEXU_MODEL_BRIDGE_URL = url;
+      await assert.rejects(() => f.server.runAI("alice", { action: "test" }), (error) => error.status === 503);
+    }
+    f.environment.KEXU_MODEL_BRIDGE_URL = localBindings.KEXU_MODEL_BRIDGE_URL;
+    f.environment.KEXU_MODEL_BRIDGE_TOKEN = "invalid";
+    await assert.rejects(() => f.server.runAI("alice", { action: "test" }), (error) => error.status === 503);
+    assert.equal(calls, baseline);
+  } finally { f.close(); }
+});
+
+test("真实Workerd执行生产模型请求：云端和本机桥均兼容manual且不会跟随重定向", { timeout: 45_000 }, async () => {
+  const [{ Miniflare }, { build }] = await Promise.all([import("miniflare"), import("esbuild")]);
+  const bundle = await build({
+    absWorkingDir: project, bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["cloudflare:workers"],
+    stdin: { contents: `import { POST } from "./app/api/ai/route.ts"; import { storeKey } from "./lib/server.ts"; export default { async fetch(request) { await storeKey("workerd-synthetic-user", "sk-workerd-synthetic-test-only"); return POST(request); } };`, resolveDir: project, sourcefile: "workerd-protocol-test.ts" },
+    plugins: [{ name: "synthetic-auth", setup(builder) {
+      builder.onResolve({ filter: /^@\/app\/chatgpt-auth$/ }, () => ({ path: "auth", namespace: "synthetic-auth" }));
+      builder.onLoad({ filter: /.*/, namespace: "synthetic-auth" }, () => ({ contents: 'export async function getChatGPTUser() { return { userId: "workerd-synthetic-user" }; }', loader: "js" }));
+    } }],
+  });
+  for (const local of [false, true]) {
+    let upstreamStatus = 200;
+    const calls = [];
+    const mf = new Miniflare({
+      modules: true, script: bundle.outputFiles[0].text, compatibilityDate: "2026-01-01", compatibilityFlags: ["nodejs_compat"],
+      d1Databases: { DB: "model-protocol-test" }, bindings: { APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"), ...(local ? localBindings : {}) },
+      outboundService: async (request) => {
+        calls.push({ url: request.url, authorization: request.headers.get("Authorization"), bridgeToken: request.headers.get("X-Kexu-Model-Token"), modelUrl: request.headers.get("X-Kexu-Model-Url"), body: await request.json() });
+        if (upstreamStatus !== 200) return new Response(null, { status: upstreamStatus, headers: { Location: "https://untrusted.example/collect-key" } });
+        return modelResponse({ ok: true });
+      },
+    });
+    try {
+      const db = await mf.getD1Database("DB");
+      for (const filename of readdirSync(path.join(project, "drizzle")).filter((name) => name.endsWith(".sql")).sort()) {
+        const statements = readFileSync(path.join(project, "drizzle", filename), "utf8").split("--> statement-breakpoint").map((sql) => sql.trim()).filter(Boolean);
+        await db.batch(statements.map((sql) => db.prepare(sql)));
+      }
+      const request = () => mf.dispatchFetch(`${origin}/api/ai`, { method: "POST", headers: { origin, "content-type": "application/json", ...(local ? workspaceHeaders("legacy", 1) : {}) }, body: JSON.stringify({ action: "test" }) });
+      const success = await request();
+      assert.equal(success.status, 200, `${local ? "local" : "cloud"}: ${await success.clone().text()}`);
+      assert.match((await success.json()).summary, /连接成功/);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, local ? localBindings.KEXU_MODEL_BRIDGE_URL : "https://api.deepseek.com/chat/completions");
+      assert.equal(calls[0].authorization, "Bearer sk-workerd-synthetic-test-only");
+      assert.equal(calls[0].bridgeToken, local ? localBindings.KEXU_MODEL_BRIDGE_TOKEN : null);
+      assert.equal(calls[0].modelUrl, local ? "https://api.deepseek.com/chat/completions" : null);
+      assert.equal(calls[0].body.stream, false);
+      for (upstreamStatus of [301, 302, 307, 308]) {
+        const before = calls.length;
+        const rejected = await request();
+        assert.equal(rejected.status, 502);
+        assert.match((await rejected.json()).error, /重定向/);
+        assert.equal(calls.length, before + 1);
+      }
+    } finally { await mf.dispose(); }
+  }
 });

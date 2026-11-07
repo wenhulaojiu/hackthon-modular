@@ -3,11 +3,14 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 // 收件复用只读导出组件；发送网关须由用户另行安装并在本机验收。
-export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now } = {}) {
+export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace } = {}) {
   let config;
   let startedAt = 0;
   let paused = true;
   let lastError = '';
+  function assertCurrent() {
+    if (workspace && currentWorkspace?.() !== workspace.workspaceToken) throw Object.assign(new Error('微信工作区已切换，接待已停止，请刷新后重新启动。'), { status: 409, code: 'WORKSPACE_CHANGED' });
+  }
 
   async function gateway() {
     let value;
@@ -21,6 +24,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   }
 
   async function call(target, endpoint, data) {
+    assertCurrent();
     const response = await request(`${target.origin}${endpoint}`, {
       method: data === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(data === undefined ? 5000 : 60_000),
       headers: { Authorization: `Bearer ${target.token}`, Accept: 'application/json', ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
@@ -42,6 +46,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   }
 
   async function status({ probe = false } = {}) {
+    assertCurrent();
     const local = await reader.inspect();
     const canReceive = local.configured && local.pythonReady && local.exporterReady && local.databaseReady !== false && !local.message;
     let canSend = false;
@@ -60,7 +65,9 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   }
 
   async function start(next) {
+    assertCurrent();
     const ready = await status({ probe: true });
+    assertCurrent();
     if (!ready.canReceive) throw new Error(ready.message || '请先安装并配置本机微信只读组件。');
     if (next.settings.mode === 'auto' && !ready.canSend) throw new Error('自动发送尚未接通，请先使用草稿接待，或安装并验收本机发送网关。');
     const allowed = new Set(next.settings.selectedCustomerIds);
@@ -76,12 +83,14 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   function syncConfig(next) { config = next; }
 
   async function poll() {
+    assertCurrent();
     if (paused || !config) return [];
     const selected = new Set(config.settings.selectedCustomerIds);
     const ids = config.customers.filter(c => selected.has(c.id) && c.autoReplyEnabled && !c.humanTakeover).map(c => c.wechatId);
     if (!ids.length) return [];
     if (ids.length > 20 || new Set(ids).size !== ids.length) throw new Error('接待客户映射不明确或超过 20 位，已暂停。');
     const snapshots = await reader.readForReplies(ids);
+    assertCurrent();
     const events = [];
     for (const snapshot of snapshots) {
       const chatId = snapshot.metadata?.chat_username;
@@ -95,7 +104,8 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
         const localId = String(message.local_id || '');
         const identity = /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? `server:${serverId}` : localId && message.source_database ? `local:${message.source_database}:${localId}` : '';
         if (!identity || typeof message.content !== 'string' || message.content.length > 8000) continue;
-        const id = createHash('sha256').update(`${chatId}|${identity}`).digest('hex');
+        const scope = workspace && workspace.id !== 'legacy' ? `${workspace.id}|` : '';
+        const id = createHash('sha256').update(`${scope}${chatId}|${identity}`).digest('hex');
         events.push({ id: `wx:${id}`, nativeMessageId: /^\d+$/.test(serverId) && /[1-9]/.test(serverId) ? serverId : undefined, chatId, sender, text: message.content, date: new Date(time).toISOString(), source: 'realtime', kind: String(message.local_type) === '1' ? 'text' : 'unsupported' });
       }
     }
@@ -104,12 +114,14 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
   }
 
   async function send({ chatId, text, idempotencyKey }) {
+    try { assertCurrent(); } catch (error) { return { status: 'failed', error: error.message }; }
     if (paused || !config) return { status: 'failed', error: '本地接待已暂停。' };
     const selected = new Set(config.settings.selectedCustomerIds);
     if (!config.customers.some(c => c.wechatId === chatId && selected.has(c.id) && c.autoReplyEnabled && !c.humanTakeover)) return { status: 'failed', error: '该会话不在客服白名单或已由人工接管。' };
     let target;
     try { target = await gateway(); } catch (error) { return { status: 'failed', error: error.message }; }
     if (!target) return { status: 'failed', error: '尚未安装本机发送网关。' };
+    try { assertCurrent(); } catch (error) { return { status: 'failed', error: error.message }; }
     const textSha256 = createHash('sha256').update(text, 'utf8').digest('hex');
     try {
       // 发出请求后无法核验的情况均视为未知，绝不自动重试。

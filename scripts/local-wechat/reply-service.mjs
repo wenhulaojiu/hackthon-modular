@@ -5,27 +5,40 @@ import { LocalError, guardLocalRequest, readLocalBody, sendLocalJson } from './s
 
 const PREFIX = '/__local-wechat/replies';
 
-export async function createLocalReplyService({ root, reader, origin, fetch: request = globalThis.fetch, adapter: suppliedAdapter, pollMs = 30_000, generate: suppliedGenerate } = {}) {
+export async function createLocalReplyService({ root, reader, origin, fetch: request = globalThis.fetch, adapter: suppliedAdapter, pollMs = 30_000, generate: suppliedGenerate, workspace, currentWorkspace } = {}) {
   const address = new URL(origin);
   if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1') throw new Error('接待后台只能请求同一本机服务。');
-  const adapter = suppliedAdapter || createReplyAdapter({ root, reader, fetch: request });
+  if (workspace && workspace.id !== 'legacy' && !/^acct-[a-f0-9]{20}$/.test(workspace.id)) throw new Error('接待工作区标识不正确。');
+  const adapter = suppliedAdapter || createReplyAdapter({ root, reader, fetch: request, workspace, currentWorkspace });
   let closed = false;
   let polling = null;
-  const generate = suppliedGenerate || (async (work, { signal } = {}) => {
+  function assertCurrent() {
+    if (closed || workspace && currentWorkspace?.() !== workspace.workspaceToken) throw new LocalError(409, '微信工作区已切换，接待已停止，请刷新页面。', 'WORKSPACE_CHANGED');
+  }
+  function checkWorkspace(incoming) {
+    assertCurrent();
+    if (workspace && incoming.headers['x-kexu-workspace'] !== workspace.workspaceToken) throw new LocalError(409, '微信工作区已切换，请刷新页面后重试。', 'WORKSPACE_CHANGED');
+  }
+  const generateReply = suppliedGenerate || (async (work, { signal } = {}) => {
     // 本地身份cookie仅在回环开发服务有效，云端不接受此身份。
     const response = await request(`${address.origin}/api/reply`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(75_000)]),
-      headers: { Origin: address.origin, 'Content-Type': 'application/json', Cookie: '__sites_local_auth=1' },
+      headers: { Origin: address.origin, 'Content-Type': 'application/json', Cookie: '__sites_local_auth=1', ...(workspace ? { 'X-Kexu-Workspace': workspace.workspaceToken } : {}) },
       body: JSON.stringify({ customerId: work.customerId, message: work.message, context: work.context }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '接待回复生成失败，请检查AI配置。');
     return data;
   });
-  const engine = await createReplyEngine({ directory: path.join(root, '.local-wechat', 'replies'), send: input => adapter.send(input), generate });
+  const generate = async (...args) => { assertCurrent(); const result = await generateReply(...args); assertCurrent(); return result; };
+  const queueDirectory = path.join(root, '.local-wechat', 'replies', ...(workspace && workspace.id !== 'legacy' ? [workspace.id] : []));
+  const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, generate });
 
   async function status() {
-    return { ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000) };
+    assertCurrent();
+    const result = { ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000), ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}) };
+    assertCurrent();
+    return result;
   }
 
   async function poll() {
@@ -33,9 +46,11 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
     if (closed || polling) return;
     polling = (async () => {
       try {
+        assertCurrent();
         const config = await engine.getConfig();
         adapter.syncConfig(config);
         const events = await adapter.poll();
+        assertCurrent();
         // 读取期间暂停或关闭后，不再将刚读出的新消息加入接待队列。
         if (closed || !(await engine.status()).running) return;
         for (const event of events) await engine.ingest(event);
@@ -55,19 +70,23 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
     try {
       const write = request.method === 'POST';
       guardLocalRequest(request, '/replies', write);
+      checkWorkspace(request);
       if (closed) throw new LocalError(503, '本机接待服务已停止。');
       const route = pathname.slice(PREFIX.length);
       if (request.method === 'GET' && route === '/status') sendLocalJson(response, 200, await status());
       else if (write) {
         const input = await readLocalBody(request, route === '/config' ? 1_400_000 : 24_000);
+        checkWorkspace(request);
         const empty = () => { if (!input || Array.isArray(input) || typeof input !== 'object' || Object.keys(input).length) throw new LocalError(400, '此操作不接收额外参数。'); };
         if (route === '/config') {
           // 配置变更先停发，避免规则校验与后台发送交叉；需商家确认后重新启动。
           adapter.pause();
           await engine.pause();
+          assertCurrent();
           if (input?.settings?.mode === 'auto' && !(await adapter.status({ probe: true })).canSend) throw new LocalError(409, '自动发送尚未接通，请使用草稿接待。');
           await engine.syncConfig(input);
           const config = await engine.getConfig();
+          assertCurrent();
           adapter.syncConfig(config);
           if (!config.settings.enabled) adapter.pause();
         } else if (route === '/start') {
@@ -75,6 +94,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           const config = await engine.getConfig();
           if (!config?.settings.enabled) throw new LocalError(400, '请先保存并启用接待规则。');
           await adapter.start(config);
+          assertCurrent();
           try { await engine.start(); } catch (error) { adapter.pause(); throw error; }
           void poll().catch(() => {});
         } else if (route === '/pause') { empty(); adapter.pause(); await engine.pause(); }
@@ -86,6 +106,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
           if (match[2] === 'approve') {
             empty();
             if (!(await adapter.status({ probe: true })).canSend) throw new LocalError(409, '自动发送尚未接通。请复制草稿手动发送，或先安装并验收发送网关。');
+            assertCurrent();
             await engine.approve(match[1]);
           } else if (match[2] === 'reject') {
             if (!input || Object.keys(input).some(key => key !== 'reason') || (input.reason !== undefined && (typeof input.reason !== 'string' || input.reason.length > 500))) throw new LocalError(400, '请填写500字以内的取消原因。');
@@ -98,7 +119,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
         sendLocalJson(response, 200, await status());
       } else throw new LocalError(405, '该接待接口不支持此操作。');
     } catch (error) {
-      if (!response.headersSent && !response.destroyed) sendLocalJson(response, Number.isInteger(error.status) ? error.status : 503, { error: error.status ? error.message : '本机接待暂不可用，请检查组件或配置。' });
+      if (!response.headersSent && !response.destroyed) sendLocalJson(response, Number.isInteger(error.status) ? error.status : 503, { error: error.status ? error.message : '本机接待暂不可用，请检查组件或配置。', ...(error.code === 'WORKSPACE_CHANGED' ? { code: error.code } : {}) });
     }
     return true;
   }
@@ -108,6 +129,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
     clearInterval(timer);
     adapter.pause();
     await engine.close();
+    await polling;
     // reader.close由拥有者调用，会取消正在执行的只读导出。
   }
   return { handle, close, status, poll };

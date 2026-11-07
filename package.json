@@ -41,6 +41,7 @@
     "recharts": "^3.8.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "3.6.0",
+    "undici": "7.24.8",
     "vaul": "^1.1.2",
     "zod": "^3.25.76"
   },

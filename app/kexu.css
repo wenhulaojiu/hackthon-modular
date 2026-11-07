@@ -13,3 +13,8 @@
 @media(max-width:720px){.stat-note,.card-heading p,.page-heading p,.table-secondary{font-size:10px}.customers-page>.page-heading,.settings-page>.page-heading{margin-bottom:12px}}
 
 .sample-links{flex-wrap:wrap;gap:10px 15px}
+.workspace-changed-banner { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; margin-bottom: 22px; color: #775c49; background: #fff8ed; border: 1px solid #ead9bc; border-radius: 12px; }
+.workspace-changed-banner strong { font-size: 14px; }
+.workspace-changed-banner p { margin-top: 5px; font-size: 12px; line-height: 1.8; }
+.workspace-changed-banner .btn { flex: 0 0 auto; }
+@media (max-width: 720px) { .workspace-changed-banner { align-items: stretch; flex-direction: column; } }

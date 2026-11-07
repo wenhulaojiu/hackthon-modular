@@ -1,4 +1,5 @@
 import vinext from "vinext";
+import { randomBytes } from "node:crypto";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
@@ -40,6 +41,9 @@ const localBindingConfig = {
 
 export default defineConfig(async ({ command }) => {
   configureToolEnvironment(process.cwd());
+  // 仅本机开发运行注入内部传输凭证，构建产物和云端均不包含此凭证。
+  const localMode = command === "serve" && !managedLinux && process.env.KEXU_LOCAL_WECHAT === "1";
+  const modelBridgeToken = localMode ? randomBytes(32).toString("hex") : undefined;
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
@@ -57,7 +61,7 @@ export default defineConfig(async ({ command }) => {
         : {}),
     },
     plugins: [
-      localWechatPlugin(),
+      localWechatPlugin({ modelBridgeToken }),
       vinext(),
       sites({ mockAuth: !managedLinux }),
       connectorPreview(),
@@ -66,6 +70,7 @@ export default defineConfig(async ({ command }) => {
         inspectorPort: false,
         config: {
           ...localBindingConfig,
+          ...(localMode ? { vars: { KEXU_LOCAL_MODE: "1", KEXU_MODEL_BRIDGE_URL: "http://127.0.0.1:5173/__local-wechat/model-transport", KEXU_MODEL_BRIDGE_TOKEN: modelBridgeToken! } } : {}),
           ...(command === "serve"
             ? {
                 services: [

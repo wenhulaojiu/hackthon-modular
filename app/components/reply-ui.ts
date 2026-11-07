@@ -1,4 +1,5 @@
 import type { AppState, ReplySettings } from '../../lib/types';
+import { assertWorkspaceCurrent, captureWorkspace, workspaceFetch } from '../../lib/client-workspace';
 
 export function replySettingsFor(state: AppState): ReplySettings {
   const value = state.replySettings;
@@ -29,9 +30,11 @@ export class ReplyBridgeError extends Error {
 
 export async function replyRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   if (!localRepliesAvailable()) throw new ReplyBridgeError('微信自动回复仅能在本机运行，云端可管理资料和规则。');
-  const response = await fetch(`/__local-wechat/replies${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'X-Kexu-Local': '1', Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
+  const expected = captureWorkspace();
+  const response = await workspaceFetch(`/__local-wechat/replies${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'X-Kexu-Local': '1', Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) }, expected);
   let result: unknown;
   try { result = await response.json(); } catch { throw new ReplyBridgeError(response.status === 404 ? '本地自动回复组件尚未启用，请使用最新本地版客序。' : '本地自动回复组件返回了无法识别的结果。', response.status); }
+  assertWorkspaceCurrent(expected);
   if (!response.ok) { const record = result as { error?: unknown; message?: unknown }; throw new ReplyBridgeError(typeof record?.error === 'string' ? record.error : typeof record?.message === 'string' ? record.message : `本地请求失败（${response.status}）`, response.status); }
   return result as T;
 }

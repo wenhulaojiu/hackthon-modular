@@ -12,7 +12,7 @@ const MAX_BYTES = 1_500_000;
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 class LocalError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, code) { super(message); this.status = status; if (code) this.code = code; }
 }
 
 function inside(parent, child) {
@@ -152,6 +152,14 @@ export function createLocalWechatService(options = {}) {
   let cacheFingerprint = "";
   let active = null;
   let closed = false;
+  const workspace = options.workspace;
+  function assertCurrent() {
+    if (workspace && options.currentWorkspace?.() !== workspace.workspaceToken) throw new LocalError(409, "微信工作区已切换，请刷新页面后重试。", "WORKSPACE_CHANGED");
+  }
+  function checkWorkspace(request) {
+    assertCurrent();
+    if (workspace && request.headers["x-kexu-workspace"] !== workspace.workspaceToken) throw new LocalError(409, "微信工作区已切换，请刷新页面后重试。", "WORKSPACE_CHANGED");
+  }
 
   async function inspect() {
     let config;
@@ -168,14 +176,23 @@ export function createLocalWechatService(options = {}) {
     const [exporterReady, pythonReady] = await Promise.all([isFile(exporter), isFile(config.pythonPath)]);
     let databaseReady = true;
     if (config.dbDir) { try { databaseReady = (await stat(config.dbDir)).isDirectory(); } catch { databaseReady = false; } }
-    const message = platform !== "win32" ? "当前本机读取只支持 Windows 微信 4.x。" : !exporterReady ? "本地提取工具尚未安装完整。" : !pythonReady ? "本地 Python 环境尚未准备好。" : !databaseReady ? "配置的微信数据库目录不可用，请在本地重新选择。" : undefined;
+    let bindingMatches = true;
+    const expectedDbDir = options.expectedDbDir?.();
+    if (expectedDbDir) {
+      try {
+        const actual = await realpath(config.dbDir);
+        bindingMatches = process.platform === 'win32' ? actual.toLowerCase() === expectedDbDir.toLowerCase() : actual === expectedDbDir;
+      } catch { bindingMatches = false; }
+    }
+    const message = platform !== "win32" ? "当前本机读取只支持 Windows 微信 4.x。" : !bindingMatches ? "微信读取目录已在其他程序更改，请在账号列表中重新选择并核对绑定。" : !exporterReady ? "本地提取工具尚未安装完整。" : !pythonReady ? "本地 Python 环境尚未准备好。" : !databaseReady ? "配置的微信数据库目录不可用，请在本地重新选择。" : undefined;
     return { configured: true, exporterReady, pythonReady, message, config, exporter, databaseReady };
   }
 
   async function ready() {
+    assertCurrent();
     if (closed) throw new LocalError(503, "本地提取服务已停止。");
     const state = await inspect();
-    if (!state.configured || !state.exporterReady || !state.pythonReady || !state.databaseReady || platform !== "win32") throw new LocalError(503, state.message || "本地环境尚未准备好。");
+    if (!state.configured || !state.exporterReady || !state.pythonReady || !state.databaseReady || state.message || platform !== "win32") throw new LocalError(503, state.message || "本地环境尚未准备好。");
     // 状态轮询不读脚本；只有明确读取操作才核对关键脚本指纹。
     const scriptInfo = await stat(state.exporter);
     if (scriptInfo.size > 2_000_000) throw new LocalError(503, "本地导出脚本大小异常，请重新核对安装来源。");
@@ -192,10 +209,12 @@ export function createLocalWechatService(options = {}) {
   }
 
   async function invoke(context, state, args) {
+    assertCurrent();
     const timer = setTimeout(() => { context.reason = "timeout"; context.controller.abort(); }, timeoutMs);
     timer.unref?.();
     try {
       const result = await runner({ command: state.config.pythonPath, args: ["-B", state.exporter, ...args, ...(state.config.dbDir ? ["--db-dir", state.config.dbDir] : [])], cwd: state.config.exporterRoot, signal: context.controller.signal, maxOutputBytes: 2_000_000 });
+      assertCurrent();
       if (context.controller.signal.aborted) throw new LocalError(context.reason === "timeout" ? 504 : 499, context.reason === "timeout" ? "本地读取超时，进程已停止，请缩小范围后重试。" : "本地读取已取消。");
       if (result.code !== 0 || result.tooLarge) throw upstreamError(result);
       return json(Buffer.from(String(result.stdout), "utf8"));
@@ -263,7 +282,8 @@ export function createLocalWechatService(options = {}) {
   }
 
   function publicJob(job) {
-    return { status: job.status, progress: job.progress, ...(job.error ? { error: job.error } : {}), ...(job.status === "complete" ? { exports: job.exports } : {}) };
+    assertCurrent();
+    return { status: job.status, progress: job.progress, ...(workspace ? { workspaceToken: workspace.workspaceToken } : {}), ...(job.error ? { error: job.error } : {}), ...(job.status === "complete" ? { exports: job.exports } : {}) };
   }
 
   async function runJob(job, context, state) {
@@ -318,7 +338,8 @@ export function createLocalWechatService(options = {}) {
         if (result.contacts_available === false) warnings.push("联系人名称信息不完整，部分会话显示为原始会话 ID。");
         if (Number(result.unmapped_table_count) > 0) warnings.push("部分本机会话尚无法识别，未列入可选范围。");
         if (chats.length !== result.chats.length) warnings.push("仅展示可核验的好友私聊，群聊与文件传输助手未列出。");
-        return { chats, warnings };
+        assertCurrent();
+        return { chats, warnings, ...(workspace ? { workspaceToken: workspace.workspaceToken } : {}) };
       } finally { if (active === context) active = null; }
     })();
     return context.done;
@@ -342,7 +363,7 @@ export function createLocalWechatService(options = {}) {
     const context = claim(job);
     jobs.set(job.id, job);
     context.done = new Promise((resolve) => setImmediate(resolve)).then(() => runJob(job, context, state));
-    return { jobId: job.id };
+    return { jobId: job.id, ...(workspace ? { workspaceToken: workspace.workspaceToken } : {}) };
   }
 
   async function handle(request, response) {
@@ -352,10 +373,13 @@ export function createLocalWechatService(options = {}) {
       const action = pathname.slice(PREFIX.length);
       const write = request.method === "POST";
       guard(request, action, write);
+      if (action !== "/status") checkWorkspace(request);
       if (closed) throw new LocalError(503, "本地服务已停止。");
       if (request.method === "GET" && action === "/status") {
         const state = await inspect();
-        send(response, 200, { available: true, app: "kexu-local", launchId: process.env.KEXU_LOCAL_LAUNCH_ID || null, configured: state.configured, exporterReady: state.exporterReady, pythonReady: state.pythonReady, version: LOCAL_WECHAT_VERSION, ...(state.message ? { message: state.message } : {}) });
+        const providerNetwork = options.providerNetwork ? await options.providerNetwork() : undefined;
+        assertCurrent();
+        send(response, 200, { available: true, app: "kexu-local", launchId: process.env.KEXU_LOCAL_LAUNCH_ID || null, configured: state.configured, exporterReady: state.exporterReady, pythonReady: state.pythonReady, version: LOCAL_WECHAT_VERSION, ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}), ...(providerNetwork ? { providerNetwork } : {}), ...(state.message ? { message: state.message } : {}) });
       } else if (write && action === "/chats") {
         const input = await body(request);
         strictKeys(input, ["query"]);
@@ -379,7 +403,7 @@ export function createLocalWechatService(options = {}) {
         } else throw new LocalError(405, "该本地接口不支持此操作。");
       }
     } catch (error) {
-      if (!response.headersSent && !response.destroyed) send(response, error instanceof LocalError ? error.status : 503, { error: error instanceof LocalError ? error.message : "本地服务暂不可用，请检查配置后重试。" });
+      if (!response.headersSent && !response.destroyed) send(response, error instanceof LocalError ? error.status : 503, { error: error instanceof LocalError ? error.message : "本地服务暂不可用，请检查配置后重试。", ...(error.code === 'WORKSPACE_CHANGED' ? { code: error.code } : {}) });
     }
     return true;
   }

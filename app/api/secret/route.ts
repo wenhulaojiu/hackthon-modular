@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { ApiError, apiResponse, json, parseInput, readJson, removeKey, requireSameOrigin, requireUserId, storeKey } from "@/lib/server";
+import { ApiError, apiResponse, json, parseInput, readJson, removeKey, requestWorkspace, requireSameOrigin, requireUserId, storeKey } from "@/lib/server";
 
 export async function POST(request: Request) {
   return apiResponse(async () => {
     const userId = await requireUserId();
     requireSameOrigin(request);
+    requestWorkspace(request, true);
     const input = parseInput(z.object({ apiKey: z.string().max(512).optional(), remove: z.boolean().optional() }).strict(), await readJson(request, 2048));
     if (input.remove) { await removeKey(userId); return json({ hasApiKey: false }); }
     const apiKey = input.apiKey?.trim() ?? "";

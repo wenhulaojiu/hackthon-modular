@@ -3,9 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CalendarDays, Check, CheckCircle2, ChevronRight, Download, FolderInput, Loader2, MessageCircle, Monitor, RefreshCw, Search, ShieldCheck, Square, X } from 'lucide-react';
 import { shiftDate, today } from '../../lib/domain';
+import { assertWorkspaceCurrent, beginWorkspaceSwitch, captureWorkspace, getWorkspaceScope, setWorkspaceToken, subscribeWorkspaceInvalidation, validWorkspaceToken, workspaceFetch, workspaceHeaders } from '../../lib/client-workspace';
 
 type LocalWechatProps = { onImport: (exports: unknown[]) => Promise<boolean> | boolean; notify: (text: string, error?: boolean) => void };
-type BridgeStatus = { available?: boolean; configured?: boolean; exporterReady?: boolean; pythonReady?: boolean; version?: string; message?: string };
+type BoundAccount = { id: string; label: string; workspaceToken: string };
+type Accounts = { active: BoundAccount; accounts: Array<{ id: string; label: string; active: boolean }>; message?: string };
+type BridgeStatus = { available?: boolean; configured?: boolean; exporterReady?: boolean; pythonReady?: boolean; version?: string; message?: string; active?: BoundAccount; workspaceToken?: string };
 type Chat = { id: string; name: string; type: 'private' };
 type Progress = number | string | { current?: number; total?: number; percent?: number; message?: string };
 type Job = { status?: string; progress?: Progress; message?: string; error?: string; exports?: unknown[]; messageCount?: number };
@@ -27,6 +30,7 @@ const isAbort = (error: unknown) => error instanceof Error && error.name === 'Ab
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : '本地组件暂时没有响应，请重试。';
 
 async function request<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
+  const expected = captureWorkspace();
   // 始终使用同源入口，浏览器不连接其他端口或外部服务。
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -36,7 +40,7 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown): Pr
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 60_000);
   let response: Response;
   try {
-    response = await fetch(`/__local-wechat${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Kexu-Local': '1', Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store', credentials: 'same-origin' });
+    response = await workspaceFetch(`/__local-wechat${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Kexu-Local': '1', Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store', credentials: 'same-origin' }, expected);
   } catch (error) {
     if (timedOut) throw new BridgeError('本地组件响应超时，请保持微信及客序本地服务运行后重试。');
     if (isAbort(error)) throw error;
@@ -45,6 +49,7 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown): Pr
   let payload: unknown;
   try { payload = await response.json(); }
   catch { throw new BridgeError(response.status === 404 ? '此页面尚未启用本地微信组件。' : '本地组件返回了无法识别的响应，请检查版本后重试。', response.status); }
+  assertWorkspaceCurrent(expected);
   if (!response.ok) {
     const message = isRecord(payload) && typeof payload.error === 'string' ? payload.error : isRecord(payload) && typeof payload.message === 'string' ? payload.message : `本地组件请求失败（${response.status}）。`;
     throw new BridgeError(message, response.status);
@@ -92,6 +97,12 @@ export default function LocalWechat({ onImport, notify }: LocalWechatProps) {
   const [failure, setFailure] = useState('');
   const [cancelling, setCancelling] = useState(false);
   const [result, setResult] = useState<{ files: number; messages: number | null } | null>(null);
+  const [accounts, setAccounts] = useState<Accounts | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState('');
+  const [accountError, setAccountError] = useState('');
+  const [switching, setSwitching] = useState(false);
+  const [workspaceLocked, setWorkspaceLocked] = useState(false);
+  const [preferencesKey] = useState(() => `${PREFERENCES_KEY}:${getWorkspaceScope()}`);
   const alive = useRef(true);
   const generation = useRef(0);
   const jobId = useRef<string | null>(null);
@@ -100,13 +111,45 @@ export default function LocalWechat({ onImport, notify }: LocalWechatProps) {
   const chatController = useRef<AbortController | null>(null);
   const jobController = useRef<AbortController | null>(null);
   const cancelController = useRef<AbortController | null>(null);
+  const accountController = useRef<AbortController | null>(null);
   const propsRef = useRef({ onImport, notify });
   propsRef.current = { onImport, notify };
   const working = phase === 'starting' || phase === 'running' || phase === 'importing';
 
   const clearPolling = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; jobController.current?.abort(); jobController.current = null; };
 
+  const checkAccounts = async () => {
+    if (!isLocalBrowser()) return;
+    accountController.current?.abort();
+    const controller = new AbortController(); accountController.current = controller;
+    try {
+      const info = await request<Accounts>('/accounts', controller.signal);
+      if (!alive.current || controller.signal.aborted) return;
+      if (!Array.isArray(info.accounts) || !info.active?.id || !validWorkspaceToken(info.active.workspaceToken)) throw new Error('本地账号信息不完整，请更新本地版后重试。');
+      setAccounts(info); setSelectedAccount(info.active.id); setAccountError('');
+    } catch (error) { if (alive.current && !isAbort(error)) setAccountError(errorMessage(error)); }
+  };
+
+  const selectAccount = async () => {
+    if (workspaceLocked || switching || !accounts || selectedAccount === accounts.active.id || !accounts.accounts.some(account => account.id === selectedAccount)) return;
+    let headers: Headers;
+    try { headers = workspaceHeaders({ 'X-Kexu-Local': '1', Accept: 'application/json', 'Content-Type': 'application/json' }); }
+    catch (error) { setAccountError(errorMessage(error)); return; }
+    setSwitching(true); setAccountError('');
+    // 切换请求沿用旧标识；业务请求先统一停止，成功后整页重新加载。
+    beginWorkspaceSwitch();
+    try {
+      const response = await fetch('/__local-wechat/accounts/select', { method: 'POST', headers, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(60_000), body: JSON.stringify({ accountId: selectedAccount }) });
+      const payload = await response.json() as { error?: string; active?: BoundAccount; workspaceToken?: string; reload?: boolean };
+      if (!response.ok) throw new Error(payload.error || '账号切换未完成，请刷新后核对绑定状态。');
+      if (!validWorkspaceToken(payload.workspaceToken) || payload.active?.id !== selectedAccount || payload.active.workspaceToken !== payload.workspaceToken || payload.reload !== true) throw new Error('账号切换结果无法确认，请刷新后核对绑定状态。');
+      setWorkspaceToken(payload.workspaceToken);
+      window.location.reload();
+    } catch (error) { if (alive.current) { setSwitching(false); setAccountError(`${errorMessage(error)} 请刷新工作空间后再操作。`); } }
+  };
+
   const checkStatus = async () => {
+    if (workspaceLocked) return;
     if (!isLocalBrowser()) { setConnection('remote'); return; }
     statusController.current?.abort();
     const controller = new AbortController(); statusController.current = controller;
@@ -126,9 +169,13 @@ export default function LocalWechat({ onImport, notify }: LocalWechatProps) {
 
   useEffect(() => {
     alive.current = true;
+    const unsubscribe = subscribeWorkspaceInvalidation(() => {
+      generation.current += 1; clearPolling(); statusController.current?.abort(); chatController.current?.abort(); cancelController.current?.abort(); accountController.current?.abort();
+      jobId.current = null; setPreferencesLoaded(false); setWorkspaceLocked(true); setChats([]); setChatsLoaded(false); setSelectedIds([]); setQuery(''); setResult(null); setWarnings([]); setReading(false); setCancelling(false); setPhase('idle'); setFailure(''); setJobMessage('');
+    });
     if (isLocalBrowser()) {
       try {
-        const stored: unknown = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || 'null');
+        const stored: unknown = JSON.parse(localStorage.getItem(preferencesKey) || 'null');
         if (isRecord(stored)) {
           if (Array.isArray(stored.selectedIds)) setSelectedIds([...new Set(stored.selectedIds.filter((item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 256))].slice(0, MAX_CHATS));
           if (typeof stored.start === 'string' && validDate(stored.start)) setStart(stored.start);
@@ -138,16 +185,17 @@ export default function LocalWechat({ onImport, notify }: LocalWechatProps) {
     }
     setPreferencesLoaded(true);
     void checkStatus();
-    return () => { alive.current = false; generation.current += 1; clearPolling(); statusController.current?.abort(); chatController.current?.abort(); cancelController.current?.abort(); };
+    void checkAccounts();
+    return () => { alive.current = false; unsubscribe(); generation.current += 1; clearPolling(); statusController.current?.abort(); chatController.current?.abort(); cancelController.current?.abort(); accountController.current?.abort(); };
     // 状态查询仅在挂载时进行，不读取微信会话。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!preferencesLoaded || !isLocalBrowser()) return;
+    if (!preferencesLoaded || workspaceLocked || !isLocalBrowser()) return;
     const preferences: Preferences = { selectedIds, start, end };
-    try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* 禁用本地存储不影响提取。 */ }
-  }, [selectedIds, start, end, preferencesLoaded]);
+    try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); } catch { /* 禁用本地存储不影响提取。 */ }
+  }, [selectedIds, start, end, preferencesLoaded, preferencesKey, workspaceLocked]);
 
   const readChats = async () => {
     if (connection !== 'ready' || reading || working) return;
@@ -264,10 +312,12 @@ export default function LocalWechat({ onImport, notify }: LocalWechatProps) {
   const rangeDays = validDate(start) && validDate(end) ? daysBetween(start, end) : 0;
   const validRange = rangeDays >= 1 && rangeDays <= MAX_DAYS && end <= today();
   const needsSetup = ['remote', 'unavailable', 'setup', 'error'].includes(connection);
-  const ready = connection === 'ready';
+  const ready = connection === 'ready' && !workspaceLocked;
 
   return <section className="card local-wechat-panel" aria-labelledby="local-wechat-title">
     <div className="local-wechat-heading"><span className="local-wechat-symbol"><MessageCircle size={23} /></span><div><div className="local-wechat-title-row"><h2 id="local-wechat-title">微信聊天，一键提取到客序</h2><span className="local-wechat-local-label"><Monitor size={11} />本机读取</span></div><p>选择私聊和时间范围，提取完成后自动导入，无需手动选择文件。</p></div><span className={`local-wechat-status ${ready ? 'ready' : ''}`}><span />{connection === 'checking' ? '检查本地组件' : ready ? '本地组件已就绪' : connection === 'remote' ? '请在本机使用' : '本地组件待准备'}</span></div>
+
+    <div className="local-wechat-account"><div><h3>当前绑定的数据账号</h3><p>此处切换数据绑定，不会自动判断当前微信登录账号。</p></div>{isLocalBrowser() ? <><div className="local-wechat-account-controls"><label><span className="sr-only">选择微信数据账号</span><select className="input" value={selectedAccount} disabled={!accounts || switching || workspaceLocked || working} onChange={event => setSelectedAccount(event.target.value)}>{accounts ? accounts.accounts.map(account => <option key={account.id} value={account.id}>{account.label}{account.active ? '（当前绑定）' : ''}</option>) : <option value="">正在获取本地绑定信息</option>}</select></label><button className="btn secondary sm" disabled={!accounts || !selectedAccount || selectedAccount === accounts.active.id || switching || workspaceLocked || working} onClick={() => { void selectAccount(); }}>{switching ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}{switching ? '正在切换…' : '切换数据账号'}</button></div>{accounts && <p className="local-wechat-account-current">已绑定：{accounts.active.label}<small>{accounts.active.id}</small></p>}<p>切换会暂停接待并保留旧数据。首次绑定的新工作区从空客户开始；AI 设置沿用，模型密钥共享。</p>{accounts?.message && <p>{accounts.message}</p>}{accountError && <p className="local-wechat-account-error" role="alert">{accountError}</p>}</> : <p>账号数据绑定仅在 Windows 本地版中可用。</p>}</div>
 
     {connection === 'checking' && <div className="local-wechat-checking" role="status"><Loader2 size={17} className="spin" /><span>仅检查本地组件配置，不读取微信会话。</span></div>}
 
