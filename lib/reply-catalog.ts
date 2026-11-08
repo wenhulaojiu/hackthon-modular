@@ -1,4 +1,5 @@
 import type { Product, ReplyResult } from './types';
+import { parseCustomerBudget } from './reply-money-core.mjs';
 
 type Message = { text: string; date: string };
 type Turn = Message & { sender: 'customer' | 'merchant' };
@@ -12,17 +13,9 @@ function parseRequest(text: string): Request | null {
   if (typeof text !== 'string' || text.length > 120) return null;
   // 只接受完整简单句；不删句中标点，避免把复合问题或附加指令揉成目录请求。
   const value = questionText(text);
-  // 仅识别完整的简单金额推荐；没有类型时只列商品，类别或其他约束仍交回AI。
-  const amount = String.raw`(\d+(?:\.\d+)?)`;
-  const unit = '(?:元|块)(?:钱)?';
-  const noun = '(商品|产品|服务项目|服务)?';
-  const budgetRecommendation = value.match(new RegExp(`^(?:预算)?${amount}${unit}(?:(?:以内|以下|之内)的?)?请?(?:推荐(?:什么|哪些|几款|一些|几个|几种)|(?:可以|能)买(?:什么|哪些))${noun}$`, 'u'))
-    ?? value.match(new RegExp(`^请?(?:给我|帮我)?推荐(?:几款|一些|几个|几种)?${amount}${unit}(?:以内|以下|之内)的?${noun}$`, 'u'));
-  if (budgetRecommendation) {
-    const maxPrice = Number(budgetRecommendation[1]);
-    if (!Number.isFinite(maxPrice) || maxPrice < 0) return null;
-    return { scope: budgetRecommendation[2]?.startsWith('服务') ? 'service' : 'product', mode: 'recommend', other: false, maxPrice };
-  }
+  // 与生成及发送核验使用同一预算语法；无单位数字只有明确预算前缀才成立。
+  const budget = parseCustomerBudget(text);
+  if (budget?.recommendation && budget.scope) return { scope: budget.scope, mode: 'recommend', other: false, maxPrice: budget.amount };
   if (/^(?:还有其他的|还有别的|还有其他|还有别的吗)$/u.test(value)) return { scope: null, mode: 'catalog', other: true };
   let match = value.match(/^(?:你们|你家|店里|店内|这里)?(?:都)?(?:卖什么|卖哪些(?:商品|产品)?)$/u);
   if (match) return { scope: 'product', mode: 'catalog', other: false };
@@ -92,25 +85,19 @@ function simpleHistoricalQuestion(text: string, products: Product[]): boolean {
 }
 
 function resolveHistoryRequest(history: Turn[], products: Product[], request: Request): Request | null {
-  const money = String.raw`(?:[¥￥]?\d+(?:\.\d+)?(?:元|块)(?:钱)?)`;
-  const pureBudget = new RegExp(`^(?:(?:(?:我|本次|这次)的?)?预算(?:只有|是|为|在|不超过|最多|上限(?:是|为)?)?${money}(?:以内|以下|之内|内)?|(?:不超过|最多)${money}|${money}(?:以内|以下|之内|的预算))$`, 'u');
   let historicalBudget: number | undefined, budgetScope: Scope | undefined;
   for (const [index, turn] of history.entries()) {
     if (turn.sender !== 'customer') continue;
     const value = questionText(turn.text);
     // 持续的饮食、类别和偏好条件不能被新预算或商家的后续应答冲掉。
     if (/过敏|乳糖|忌口|禁忌|不耐受|素食|吃素|偏好|喜欢|不(?:能|要|想|吃|喝)|只(?:要|看|吃|喝|选)|必须|仅限/u.test(value)) return null;
-    const priorRequest = parseRequest(turn.text);
-    if (priorRequest?.maxPrice !== undefined) {
-      if (budgetScope !== undefined && budgetScope !== priorRequest.scope) return null;
-      budgetScope = priorRequest.scope!;
-      historicalBudget = priorRequest.maxPrice;
-      continue;
-    }
-    if (pureBudget.test(value)) {
-      const amount = Number(value.match(/\d+(?:\.\d+)?/u)?.[0]);
-      if (!Number.isFinite(amount) || amount < 0) return null;
-      historicalBudget = amount;
+    const budget = parseCustomerBudget(turn.text);
+    if (budget) {
+      if (budget.scope !== null) {
+        if (budgetScope !== undefined && budgetScope !== budget.scope) return null;
+        budgetScope = budget.scope;
+      }
+      historicalBudget = budget.amount;
       continue;
     }
     if (simpleHistoricalQuestion(turn.text, products)) continue;

@@ -325,7 +325,8 @@ export async function createReplyEngine(options = {}) {
     const facts = [...products.filter(product => product.price !== null).map(product => `${product.price}元`), ...next.config.settings.faq.map(faq => faq.answer), next.config.settings.storeInfo?.serviceContent || '', ...products.flatMap(product => [product.description, ...product.faq.map(faq => faq.answer)])];
     // 客户预算只用于本次接待的明确预算表述，主动跟进不能借聊天预算放行新报价。
     const customerTexts = !job.kind || job.kind === "reply" ? [...(job.messages || [job.message]).map(message => message.text), ...contextForJob(next, job).filter(message => message.sender === "customer").map(message => message.text)] : [];
-    if (unverifiedReplyAmounts(result.reply, facts, customerTexts).length) return "回复中的价格不在已配置门店资料中。";
+    const currentTexts = !job.kind || job.kind === "reply" ? (job.messages || [job.message]).map(message => message.text) : [];
+    if (unverifiedReplyAmounts(result.reply, facts, customerTexts, currentTexts).length) return "回复中的价格不在已配置门店资料中。";
     return "";
   }
 

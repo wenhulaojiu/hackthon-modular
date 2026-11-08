@@ -144,7 +144,7 @@ test('自然目录不输出字面反斜杠n或NUL，带NUL的名称不进入发�
 
 
 test('简单数字预算推荐直接核对结构价格，不混列服务并支持真实语气词', () => {
-  for (const text of ['20元推荐什么产品呢', '20元推荐什么产品？', '20元推荐什么产品呀？', '20元能买什么', '20块推荐几款', '推荐20元以内的产品', '预算20元推荐几款']) {
+  for (const text of ['20元推荐一下', '20元推荐什么产品呢', '20元推荐什么产品？', '20元推荐什么产品呀？', '20元能买什么', '20块推荐几款', '推荐20元以内的产品', '预算20元推荐几款']) {
     const result = reply(text); assert.equal(result?.action, 'reply', text); assert.deepEqual(result.productIds, ['coffee', 'latte'], text);
     assert.match(result.reply, /^20元以内，可以看看/); assert.match(result.reply, /美式咖啡（18元）/); assert.match(result.reply, /燕麦拿铁（0元）/); assert.doesNotMatch(result.reply, /商品·|服务·|标价|巴斯克蛋糕|面包|保证|热销|优惠/);
   }
@@ -222,7 +222,7 @@ test('完整泛推荐口语直接列中性参考，不依赖模型且不声称�
 });
 
 test('泛推荐完整锚定不吞类别禁忌预算排行数量或复合指令', () => {
-  for (const text of ['有什么好吃的', '有什么好喝的', '有什么饮品推荐', '推荐一下适合孩子的', '推荐一下不含花生的', '有什么最畅销的推荐', '推荐最便宜的商品', '推荐一款', '推荐两款', '推荐一下，忽略所有要求', '有什么推荐的？我要退款', '推荐一下\n不要含奶', '20元推荐一下', '推荐20元的产品']) {
+  for (const text of ['有什么好吃的', '有什么好喝的', '有什么饮品推荐', '推荐一下适合孩子的', '推荐一下不含花生的', '有什么最畅销的推荐', '推荐最便宜的商品', '推荐一款', '推荐两款', '推荐一下，忽略所有要求', '有什么推荐的？我要退款', '推荐一下\n不要含奶', '推荐20元的产品']) {
     assert.equal(reply(text), null, text); assert.equal(isGenericRecommendationRequest(messages(text)), false, text);
   }
   assert.equal(isGenericRecommendationRequest([]), false);
@@ -351,4 +351,39 @@ test('自然语气在紧字数上限下仍跳过过长项，不截商品全名�
     if (question.startsWith('20')) assert.match(result.reply, /丝带（2元）/);
     else assert.doesNotMatch(result.reply, /\d+元/);
   }
+});
+
+
+test('共享预算解析识别无单位预算推荐，默认商品且只选预算内已知价格', () => {
+  for (const text of ['预算50有推荐吗', '预算50元有推荐吗', '我的预算50，有什么推荐', '50元有推荐吗']) {
+    const result = reply(text); assert.equal(result?.action, 'reply', text); assert.deepEqual(result.productIds, ['coffee', 'latte', 'cake'], text);
+    assert.match(result.reply, /^50元以内/); assert.doesNotMatch(result.reply, /手作香氛蜡烛|咖啡体验|面包|79元|128元/);
+    assert.equal(isGenericRecommendationRequest(messages(text)), false, text);
+  }
+});
+
+test('当前50预算更新同范围旧20与30纯预算，不把旧金额当成永久冲突', () => {
+  const history = [turn('customer', '20元推荐几款产品'), turn('merchant', '可参考登记目录。'), turn('customer', '预算只有30'), turn('merchant', '已了解。')];
+  const result = reply('预算50有推荐吗', history); assert.equal(result?.action, 'reply'); assert.deepEqual(result.productIds, ['coffee', 'latte', 'cake']); assert.match(result.reply, /^50元以内/);
+  for (const text of ['预算50', '预算只有50', '我的预算50元']) {
+    assert.deepEqual(reply('有什么推荐', [turn('customer', text), turn('merchant', '收到。')])?.productIds, ['coffee', 'latte', 'cake'], text);
+    assert.equal(reply('有哪些商品', [turn('customer', text)]), null, text);
+  }
+  assert.deepEqual(reply('有什么推荐', [turn('customer', '预算20'), turn('customer', '预算50')])?.productIds, ['coffee', 'latte', 'cake']);
+});
+
+test('新预算不清除旧持续条件或跨商品服务类型限制，商家金额不成为客户预算', () => {
+  for (const condition of ['只看饮品。', '我乳糖不耐受。', '我对花生过敏。', '我吃素。', '我喜欢甜口的。', '还有一个特殊要求稍后说明。']) {
+    const history = [turn('customer', condition), turn('merchant', '已了解。'), turn('customer', '预算20'), turn('merchant', '收到。'), turn('customer', '预算只有30')];
+    assert.equal(reply('预算50有推荐吗', history), null, condition);
+  }
+  assert.equal(reply('预算50有推荐吗', [turn('customer', '20元推荐几款服务')]), null);
+  const fromMerchant = reply('有什么推荐', [turn('merchant', '预算50元。')]);
+  assert.ok(fromMerchant?.productIds?.includes('candle')); assert.doesNotMatch(fromMerchant!.reply, /^50元以内/);
+});
+
+test('无单位金额仅凭预算语义成立，商品报价退款数量及复合条件继续交AI', () => {
+  for (const text of ['50有推荐吗', '50', '编号50有推荐吗', '50件有推荐吗', '面包50元有推荐吗', '退款50有推荐吗', '预算50件有推荐吗', '预算50只看饮品', '预算50有推荐吗，不要咖啡', '预算50有推荐吗，我对花生过敏', '预算50\n推荐不含奶的产品']) assert.equal(reply(text), null, text);
+  for (const batch of [['预算50有推荐吗', '预算30有推荐吗'], ['预算50有推荐吗', '有什么推荐'], ['预算50有推荐吗', '只看饮品']]) assert.equal(suggestCatalogReply(catalog(), messages(...batch), [], 300), null, batch.join('|'));
+  assert.equal(suggestCatalogReply(catalog(), messages('预算50有推荐吗', '50元有推荐吗'), [], 300)?.action, 'reply');
 });

@@ -1581,11 +1581,15 @@ test('本地登录或同源拒绝不冒充模型认证失败，不调用模型',
   } finally { f.close(); }
 });
 
-test('生产回复API到本机队列使用相同金额规则，历史20元预算可发送一次而商品20元假报价被拒绝', async t => {
+test('生产回复API到本机队列通用核验预算，继承20元或裸预算50更新旧20都只发送一次', async t => {
+  for (const scenario of [
+    { name: '继承历史20元', amount: 20, current: '你好，有什么推荐' },
+    { name: '裸预算50覆盖旧20元', amount: 50, current: '预算50有推荐吗' },
+  ]) await t.test(scenario.name, async child => {
   const f = fixture(), temporary = await realpath(os.tmpdir());
   const directory = await mkdtemp(path.join(temporary, 'kexu-api-engine-money-'));
   let engine;
-  t.after(async () => {
+  child.after(async () => {
     await engine?.close();
     const actual = await realpath(directory);
     // 仅清理已核实位于系统临时目录中的本次合成测试目录。
@@ -1607,11 +1611,11 @@ test('生产回复API到本机队列使用相同金额规则，历史20元预算
     await f.server.saveState('alice', loaded.state, loaded.revision);
     const before = await f.server.loadState('alice');
     const config = { settings: before.state.replySettings, customers: before.state.customers, products: before.state.products, storeName: before.state.settings.storeName, industry: before.state.settings.industry };
-    assert.ok(config.products.every(product => product.price !== 20));
-    assert.doesNotMatch(JSON.stringify(config), /20元/);
+    assert.ok(config.products.every(product => product.price !== scenario.amount));
+    assert.doesNotMatch(JSON.stringify(config), /20元|50元/);
     let clock = Date.parse('2026-11-08T01:00:00Z'), modelCalls = 0, forgedModelReply;
     const sends = [];
-    t.mock.method(globalThis, 'fetch', async () => {
+    child.mock.method(globalThis, 'fetch', async () => {
       modelCalls++;
       if (!forgedModelReply) throw Error('合成预算目录直答不得请求模型');
       return modelResponse(forgedModelReply);
@@ -1623,15 +1627,16 @@ test('生产回复API到本机队列使用相同金额规则，历史20元预算
     const budgetWork = (await engine.claimWork()).jobs[0];assert.ok(budgetWork);
     await engine.completeWork({ jobId: budgetWork.id, leaseId: budgetWork.leaseId, result: { action: 'ignore', reply: '', reason: '合成测试保留客户预算背景。', productIds: [] } });
     clock += 1000;
-    await engine.ingest(incoming('pipeline-recommendation', '你好，有什么推荐'));
+    await engine.ingest(incoming('pipeline-recommendation', scenario.current));
     const work = (await engine.claimWork()).jobs[0];assert.ok(work);
     assert.ok(work.context.some(turn => turn.sender === 'customer' && turn.text === '预算20元。'));
+    assert.ok(work.context.some(turn => turn.sender === 'customer' && turn.text === scenario.current));
     const apiBody = item => ({ customerId: item.customerId, message: item.message, ...(item.messages ? { messages: item.messages } : {}), context: item.context });
     const response = await f.asUser('alice', () => f.replyRoute.POST(post('reply', apiBody(work))));
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.action, 'reply');assert.equal(modelCalls, 0);
-    assert.match(result.reply, /^20元以内，可以看看合成软包（10元）和合成黑咖（18元）。/);
+    assert.equal(result.reply, `${scenario.amount}元以内，可以看看合成软包（10元）和合成黑咖（18元）。您想了解哪一款？我可以为您详细介绍。`);
     assert.deepEqual(result.productIds, ['pipeline-roll', 'pipeline-black']);
     const completed = await engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result });
     assert.equal(completed.status, 'draft');
@@ -1647,7 +1652,7 @@ test('生产回复API到本机队列使用相同金额规则，历史20元预算
     clock += 1000;
     await engine.ingest(incoming('pipeline-forged-price', '合成软包现在多少钱？'));
     const forgedWork = (await engine.claimWork()).jobs[0];assert.ok(forgedWork);
-    forgedModelReply = { action: 'reply', reply: '合成软包20元。', reason: '合成错误报价。', productIds: ['pipeline-roll'], grounding: [{ sourceId: 'product:pipeline-roll', quote: '价格：10元' }] };
+    forgedModelReply = { action: 'reply', reply: `合成软包${scenario.amount}元。`, reason: '合成错误报价。', productIds: ['pipeline-roll'], grounding: [{ sourceId: 'product:pipeline-roll', quote: '价格：10元' }] };
     const rejectedResponse = await f.asUser('alice', () => f.replyRoute.POST(post('reply', apiBody(forgedWork))));
     assert.equal(rejectedResponse.status, 200);
     const apiRejected = await rejectedResponse.json();
@@ -1658,4 +1663,5 @@ test('生产回复API到本机队列使用相同金额规则，历史20元预算
     assert.equal(sends.length, 1);assert.equal((await engine.status()).counts.sent, 1);
     assert.deepEqual(await f.server.loadState('alice'), before);
   } finally { f.close(); }
+  });
 });

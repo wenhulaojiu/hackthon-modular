@@ -150,3 +150,82 @@ test('截止消息缺失仍可信原始本批预算，不需要保存独立上�
   const completed = await f.engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result: result(budgetReply) });
   assert.equal(completed.status, 'draft'); assert.equal(f.sent.length, 0);
 });
+
+test('当前完整预算通用覆盖旧预算，裸预算元块及零小数均能审阅并模拟发送一次', async t => {
+  for (const [amount, unit] of [[20, '元'], [30, '块'], [50, ''], [100, '元'], [0, ''], [20.5, '块']]) await t.test(`${amount}${unit || '无单位'}`, async child => {
+    const f = await fixture(child, { wxid_c1: [turn('older-budget', 'customer', '预算15元。'), turn('old-budget', 'customer', '预算25元。', -20_000)] });
+    const reply = `${amount}元以内，您想了解哪款商品？`;
+    const { completed } = await generate(f, reply, event('synthetic-current-budget', `预算${amount}${unit}有推荐吗`));
+    assert.equal(completed.status, 'draft');assert.equal(completed.reply, reply);
+    await f.engine.approve(completed.id);await until(f.engine, state => state.counts.sent === 1);
+    assert.equal(f.sent.length, 1);assert.equal(f.sent[0].text, reply);
+    assert.ok((await f.engine.getConfig()).products.every(product => product.price !== amount));
+  });
+});
+
+test('当前50元预算不能为面包50元新报价背书，拒绝后不能批准发送', async t => {
+  const f = await fixture(t, { wxid_c1: [turn('old-budget', 'customer', '预算20元。')] });
+  const { completed } = await generate(f, '50元以内，面包50元。', event('synthetic-false-quote', '预算50有推荐吗'));
+  assert.equal(completed.status, 'handoff');assert.match(completed.reason, /价格|金额/);
+  await assert.rejects(f.engine.approve(completed.id), /只有待审核/);
+  assert.equal(f.sent.length, 0);assert.equal((await f.engine.status()).counts.sent, 0);
+});
+
+test('编号重量商品报价退款和复杂条件不成为新的50元预算依据', async t => {
+  for (const text of ['编号50', '50克', '面包50元', '退款50元', '预算50有推荐吗，不要奶', '预算50只看饮品']) await t.test(text, async child => {
+    const f = await fixture(child, { wxid_c1: [turn('old-budget', 'customer', '预算20元。')] });
+    await f.engine.start();await f.engine.ingest(event('synthetic-not-budget', text));
+    const work = (await f.engine.claimWork()).jobs[0];
+    const completed = work ? await f.engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result: result('50元以内，可以看看面包10元。') }) : (await f.engine.status()).jobs[0];
+    assert.equal(completed.status, 'handoff');assert.equal(f.sent.length, 0);
+  });
+});
+
+test('合并本批冲突预算不选择任意金额，重复同额裸预算仍可核验', async t => {
+  for (const scenario of [
+    { name: '50与100冲突', texts: ['预算50有推荐吗', '预算100有推荐吗'], reply: '50元以内，可以看看面包10元。', expected: 'handoff' },
+    { name: '当前冲突不可回退旧20', texts: ['预算50有推荐吗', '预算100有推荐吗'], reply: '20元以内，可以看看面包10元。', expected: 'handoff' },
+    { name: '重复50同额', texts: ['预算50有推荐吗', '预算50元。'], reply: '50元以内，可以看看面包10元。', expected: 'draft' },
+  ]) await t.test(scenario.name, async child => {
+    const f = await fixture(child, { wxid_c1: [turn('old-budget', 'customer', '预算20元。')] });
+    await f.engine.start();
+    for (const [index, text] of scenario.texts.entries()) await f.engine.ingest(event(`synthetic-merged-budget-${index}`, text));
+    const work = (await f.engine.claimWork()).jobs[0];assert.ok(work);assert.equal(work.messages.length, 2);
+    const completed = await f.engine.completeWork({ jobId: work.id, leaseId: work.leaseId, result: result(scenario.reply) });
+    assert.equal(completed.status, scenario.expected);assert.equal(f.sent.length, 0);
+  });
+});
+
+test('全角货币与块钱裸块虚假报价在引擎层拒绝，不因客户50预算而放行', async t => {
+  for (const amount of ['５０元', '¥５０', '￥５０元', '50块钱', '50块']) await t.test(amount, async child => {
+    const f = await fixture(child, { wxid_c1: [turn('old-budget', 'customer', '预算20元。')] });
+    const { completed } = await generate(f, `面包售价${amount}。`, event('synthetic-currency-quote', '预算50有推荐吗'));
+    assert.equal(completed.status, 'handoff');assert.match(completed.reason, /价格|金额/);
+    assert.equal(f.sent.length, 0);assert.equal((await f.engine.status()).counts.sent, 0);
+  });
+});
+
+test('登记的块钱及明确裸块价格可核实发送，包装块数不为假报价背书', async t => {
+  for (const description of ['服务收费50块钱。', '服务售价50块。', '服务价格５０元。']) await t.test(description, async child => {
+    const config = configuration();config.products = [{ id: 'priced-service', name: '合成服务', type: 'service', price: null, description, faq: [], enabled: true }];
+    const f = await fixture(child, {}, config);
+    const { completed } = await generate(f, '合成服务50元。', event('synthetic-known-currency', '合成服务多少钱？'));
+    assert.equal(completed.status, 'draft');await f.engine.approve(completed.id);
+    await until(f.engine, state => state.counts.sent === 1);assert.equal(f.sent.length, 1);
+  });
+  for (const description of ['一盒有50块饼干。', '包装内有50块。', '50块积木。']) await t.test(description, async child => {
+    const config = configuration();config.products[0].description = description;
+    const f = await fixture(child, {}, config);
+    const { completed } = await generate(f, '面包售价50块钱。');
+    assert.equal(completed.status, 'handoff');assert.equal(f.sent.length, 0);
+  });
+});
+
+test('实际包装数量正常展示，不因数量50而拒绝已知10元报价', async t => {
+  const config = configuration();config.products[0].description = '一盒含50块饼干。';
+  const f = await fixture(t, {}, config);
+  const text = '一盒含50块饼干，面包10块钱。';
+  const { completed } = await generate(f, text);
+  assert.equal(completed.status, 'draft');await f.engine.approve(completed.id);
+  await until(f.engine, state => state.counts.sent === 1);assert.equal(f.sent[0].text, text);
+});

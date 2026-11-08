@@ -562,7 +562,7 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   if (/已为您退款|已经退款|已退款|已改价|已调整价格|保证有效|一定有效|百分之百|100%/.test(result.reply)) return handoffReply("回复包含未经人工授权的操作或效果承诺。");
   // 客户预算仅能在明确预算语句中引用，不能作为商品报价依据。
   const customerTexts = [...incomingMessages.map(message => message.text), ...conversation.filter(message => message.sender === 'customer').map(message => message.text)];
-  if (unverifiedReplyAmounts(result.reply, sources.map(source => source.text), customerTexts).length) return handoffReply("回复中的金额无法在门店资料中核对。");
+  if (unverifiedReplyAmounts(result.reply, sources.map(source => source.text), customerTexts, incomingMessages.map(message => message.text)).length) return handoffReply("回复中的金额无法在门店资料中核对。");
   // 引用编号只在同一资料的现成原文中解析，编号和显式原文冲突时仍拒绝。
   let hardCitationConflict = false;
   const invalidGrounding = (result.grounding || []).map(item => {
