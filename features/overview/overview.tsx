@@ -1,9 +1,9 @@
 'use client';
 import {useId,useState} from 'react';
 import {ArrowRight,ArrowUpRight,CalendarDays,TrendingUp,UserRound,Users,Wallet} from 'lucide-react';
-import {currency,overviewStats,shiftDate} from '../lib/domain';
-import type {PageId,SharedProps} from '../lib/types';
-import {day,humanDate} from './ui';
+import {currency,overviewStats,shiftDate} from '../../lib/domain';
+import type {PageId,SharedProps} from '../../lib/types';
+import {day,humanDate} from '../shared/ui';
 export default function Overview({state,go}:SharedProps&{go:(id:PageId,customer?:string)=>void}){
  const [range,setRange]=useState(7),[metric,setMetric]=useState<'revenue'|'customers'>('revenue');const stats=overviewStats(state,range);
  const values=metric==='revenue'?stats.series.map(s=>s.netRevenue):stats.series.map(s=>state.customers.filter(c=>day(c.createdAt)===s.date).length);

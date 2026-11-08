@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./kexu.css";
-import "./components/components.css";
-import "./components/local-wechat.css";
-import "./components/auto-reply.css";
-import "./components/data-export.css";
+import "../features/shared/components.css";
+import "../features/wechat-data/local-wechat.css";
+import "../features/auto-reply/auto-reply.css";
+import "../features/data-export/data-export.css";
 import "./green-theme.css";
 
 export const metadata: Metadata = {

@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Clock3, HelpCircle, Loader2, Package, Pencil, Plus, Search, Sparkles, Store, Trash2, X } from 'lucide-react';
 import type { AppState, Product, SharedProps } from '../../lib/types';
 import { DEFAULT_RESTOCK_THRESHOLD, isProductLowStock, selectCatalogProducts, type CatalogFilter, type CatalogSort } from '../../lib/product-catalog';
-import { loadSavedReplyConfig, localRepliesAvailable, replyRequest, replySettingsFor, WEEKDAYS } from './reply-ui';
+import { loadSavedReplyConfig, localRepliesAvailable, replyRequest, replySettingsFor, WEEKDAYS } from '../auto-reply/reply-ui';
 import { assertWorkspaceCurrent, captureWorkspace } from '../../lib/client-workspace';
-import { buildWelcomeMessage, MAX_WELCOME_LENGTH, welcomeMessageError, welcomeSettingsFor } from './welcome-message';
+import { buildWelcomeMessage, MAX_WELCOME_LENGTH, welcomeMessageError, welcomeSettingsFor } from '../auto-reply/welcome-message';
 import './products.css';
 
 type FAQ = { question: string; answer: string };

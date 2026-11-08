@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Customer } from '../lib/types.ts';
-import { customerContactTimestamp, recentCustomerMessageCount, sortCustomers } from '../app/components/customer-sorting.ts';
+import { customerContactTimestamp, recentCustomerMessageCount, sortCustomers } from '../features/customers/customer-sorting.ts';
 
 const now = Date.parse('2026-11-07T12:00:00.000Z');
 const customer = (id: string, lastContactAt = '', messages: Customer['messages'] = []): Customer => ({ id, name: id, wechatId: `wxid_${id}`, color: '#000', stage: '新客户', tags: [], manualTags: [], summary: '', preferences: '', budget: '', note: '', createdAt: '2026-10-01', lastContactAt, nextFollowUpAt: '', source: 'wechat', evidence: [], messages });

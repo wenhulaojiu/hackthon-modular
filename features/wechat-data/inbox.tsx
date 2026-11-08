@@ -1,9 +1,9 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowDownToLine,FileText,Upload} from 'lucide-react';
-import type {PageId,SharedProps} from '../lib/types';
-import {parseChatImport} from '../lib/domain';
-import LocalWechat from './components/local-wechat';
+import type {PageId,SharedProps} from '../../lib/types';
+import {parseChatImport} from '../../lib/domain';
+import LocalWechat from './local-wechat';
 
 export default function Inbox({state,onChange,notify,onExport}:SharedProps&{go:(id:PageId,customer?:string)=>void;onExport:()=>void}){
  const stateRef=useRef(state);useEffect(()=>{stateRef.current=state},[state]);

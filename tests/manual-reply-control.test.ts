@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertManualReceipt, manualAutoResumeConfirmed, manualReplyError, manualReplyTerminal, observeManualReply, parseManualReplyRecord, prepareManualAttempt, replyJobResolved, replyQueueJobs, type ManualAttempt } from '../app/components/manual-reply-control.ts';
+import { assertManualReceipt, manualAutoResumeConfirmed, manualReplyError, manualReplyTerminal, observeManualReply, parseManualReplyRecord, prepareManualAttempt, replyJobResolved, replyQueueJobs, type ManualAttempt } from '../features/auto-reply/manual-reply-control.ts';
 import type { ReplyJobView } from '../lib/types.ts';
 
 const source: ReplyJobView = { id: 'd574cc3e-4790-42a0-a374-dc056968d9c0', customerId: 'synthetic-customer', chatId: 'wxid_synthetic', kind: 'reply', status: 'handoff', message: { id: 'synthetic-message', text: '合成客户问题', date: '2026-11-07T00:00:00Z' }, createdAt: '2026-11-07T00:00:00Z', updatedAt: '2026-11-07T00:00:00Z' };

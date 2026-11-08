@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { applyFollowupReceipt } from '../lib/followup.ts';
-import { batchFollowupBlockReason, followupButtonAction, followupTextSha256, prepareFollowupBatch, runFollowupBatch } from '../app/components/followup-batch.ts';
-import type { FollowupBatchContext, FollowupBatchItem, FollowupBatchPlan } from '../app/components/followup-batch.ts';
+import { batchFollowupBlockReason, followupButtonAction, followupTextSha256, prepareFollowupBatch, runFollowupBatch } from '../features/follow-ups/followup-batch.ts';
+import type { FollowupBatchContext, FollowupBatchItem, FollowupBatchPlan } from '../features/follow-ups/followup-batch.ts';
 import type { AppState, ReplyJobView } from '../lib/types.ts';
 
 function context(): FollowupBatchContext {

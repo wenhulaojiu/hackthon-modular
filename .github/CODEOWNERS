@@ -1,0 +1,17 @@
+# 默认由仓库所有者审核；添加队友后可在下方指定真实 GitHub 用户名。
+* @wenhulaojiu
+
+# 示例（取消注释前替换为拥有本仓库写权限的真实账号）：
+# /features/customers/ @客户模块负责人
+# /features/follow-ups/ @跟进模块负责人
+# /features/wechat-data/ @微信数据负责人
+# /features/auto-reply/ @自动回复负责人
+# /features/products/ @商品模块负责人
+# /features/settings/ @设置模块负责人
+
+# 公共基础与安全相关文件由仓库所有者负责。
+/.github/ @wenhulaojiu
+/app/api/ @wenhulaojiu
+/lib/ @wenhulaojiu
+/db/ @wenhulaojiu
+/scripts/local-wechat/ @wenhulaojiu

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildWelcomeMessage, DEFAULT_WELCOME_MESSAGE, welcomeMessageError, welcomeSettingsFor } from '../app/components/welcome-message.ts';
+import { buildWelcomeMessage, DEFAULT_WELCOME_MESSAGE, welcomeMessageError, welcomeSettingsFor } from '../features/auto-reply/welcome-message.ts';
 
 test('未配置时使用固定默认，明确空串和停用保持商家选择', () => {
   assert.deepEqual(welcomeSettingsFor(), { enabled: true, message: '您好，欢迎光临！想了解店里的商品或服务，都可以在这里问我。' });
