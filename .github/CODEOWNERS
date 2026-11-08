@@ -2,12 +2,12 @@
 * @wenhulaojiu
 
 # 示例（取消注释前替换为拥有本仓库写权限的真实账号）：
-# /features/customers/ @客户模块负责人
-# /features/follow-ups/ @跟进模块负责人
-# /features/wechat-data/ @微信数据负责人
-# /features/auto-reply/ @自动回复负责人
-# /features/products/ @商品模块负责人
-# /features/settings/ @设置模块负责人
+# /页面模块/02-客户档案/ @客户模块负责人
+# /页面模块/03-客户跟进/ @跟进模块负责人
+# /页面模块/04-微信数据/ @微信数据负责人
+# /页面模块/05-自动回复/ @自动回复负责人
+# /页面模块/06-商品与服务/ @商品模块负责人
+# /页面模块/07-AI与设置/ @设置模块负责人
 
 # 公共基础与安全相关文件由仓库所有者负责。
 /.github/ @wenhulaojiu

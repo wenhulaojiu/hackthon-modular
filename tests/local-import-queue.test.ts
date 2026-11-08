@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertImportBatchAvailable, createImportQueue, drainImportQueue, importQueueView, pendingImportIds, selectImportResults, type LocalImportJob, type LocalImportQueue } from '../features/wechat-data/local-import-queue.ts';
+import { assertImportBatchAvailable, createImportQueue, drainImportQueue, importQueueView, pendingImportIds, selectImportResults, type LocalImportJob, type LocalImportQueue } from '../页面模块/04-微信数据/local-import-queue.ts';
 
 type QueueIO = Parameters<typeof drainImportQueue>[1];
 const ids = (count: number) => Array.from({ length: count }, (_, index) => `synthetic_${index + 1}`);

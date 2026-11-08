@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { nativeSenderCanEnable, nativeSenderRequest, replySettingsFor } from '../features/auto-reply/reply-ui.ts';
+import { nativeSenderCanEnable, nativeSenderRequest, replySettingsFor } from '../页面模块/05-自动回复/reply-ui.ts';
 import { setWorkspaceToken } from '../lib/client-workspace.ts';
 import type { AppState, NativeSenderStatus } from '../lib/types';
 

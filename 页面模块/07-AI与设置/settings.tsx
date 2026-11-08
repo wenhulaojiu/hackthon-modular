@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Database, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Store, Trash2, Unplug } from 'lucide-react';
 import type { Settings as StoreSettings, SettingsProps } from '../../lib/types';
-import { loadSavedReplyConfig, localRepliesAvailable, replyRequest, replySettingsFor } from '../auto-reply/reply-ui';
+import { loadSavedReplyConfig, localRepliesAvailable, replyRequest, replySettingsFor } from '../05-自动回复/reply-ui';
 import { assertWorkspaceCurrent, captureWorkspace, subscribeWorkspaceInvalidation } from '../../lib/client-workspace';
 import { createCompetitionDemo } from '../../lib/competition-demo';
 

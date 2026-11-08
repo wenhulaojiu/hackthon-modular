@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowUpDown, ArrowUpRight, Bot, CalendarDays, Check, ChevronRight, Copy, FileText, Hand, Loader2, MessageCircle, Pencil, Plus, Search, Sparkles, Tag, Trash2, Wallet, X } from 'lucide-react';
 import type { AIResult, AppState, Customer, CustomersProps, CustomerStage, Order } from '../../lib/types';
 import { customerStats, shiftDate, today } from '../../lib/domain';
-import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from '../auto-reply/reply-ui';
+import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from '../05-自动回复/reply-ui';
 import { customerContactTimestamp, sortCustomers, type CustomerSort } from './customer-sorting';
 
 const STAGES: CustomerStage[] = ['新客户', '潜在客户', '活跃客户', '重点维护', '待唤醒'];

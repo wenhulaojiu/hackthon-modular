@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 2 * * 1'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,6 +19,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: 检查全部依赖的已知漏洞
+        run: npm audit --audit-level=low
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

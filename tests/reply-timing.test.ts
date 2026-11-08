@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { replyWaitLabel, replyWaitSeconds, replyWaitValue } from '../features/auto-reply/reply-timing.ts';
+import { replyWaitLabel, replyWaitSeconds, replyWaitValue } from '../页面模块/05-自动回复/reply-timing.ts';
 
 test('秒与分钟转换保留整秒，支持1.5分钟及上限60分钟', () => {
   assert.equal(replyWaitSeconds('1.5', 'minutes'), 90);

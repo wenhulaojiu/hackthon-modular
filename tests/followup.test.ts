@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyFollowupReceipt, followupBlockReason, prepareSavedFollowup } from '../lib/followup.ts';
-import { observeFollowup } from '../features/follow-ups/followup-control.ts';
+import { observeFollowup } from '../页面模块/03-客户跟进/followup-control.ts';
 import type { AppState, ReplyJobView } from '../lib/types.ts';
 
 function state(): AppState {

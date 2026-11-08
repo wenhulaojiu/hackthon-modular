@@ -982,7 +982,7 @@ test("本机模型桥只接受回环固定路径和服务端令牌，失败提�
 });
 
 test("真实Workerd执行生产模型请求：云端和本机桥均兼容manual且不会跟随重定向", { timeout: 45_000 }, async () => {
-  const [{ Miniflare }, { build }] = await Promise.all([import("miniflare"), import("esbuild")]);
+  const [{ Miniflare, convertV4MiniflareOptions }, { build }] = await Promise.all([import("miniflare"), import("esbuild")]);
   const bundle = await build({
     absWorkingDir: project, bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["cloudflare:workers"],
     stdin: { contents: `import { POST } from "./app/api/ai/route.ts"; import { storeKey } from "./lib/server.ts"; export default { async fetch(request) { await storeKey("workerd-synthetic-user", "sk-workerd-synthetic-test-only"); return POST(request); } };`, resolveDir: project, sourcefile: "workerd-protocol-test.ts" },
@@ -994,7 +994,7 @@ test("真实Workerd执行生产模型请求：云端和本机桥均兼容manual�
   for (const local of [false, true]) {
     let upstreamStatus = 200;
     const calls = [];
-    const mf = new Miniflare({
+    const mf = new Miniflare(convertV4MiniflareOptions({
       modules: true, script: bundle.outputFiles[0].text, compatibilityDate: "2026-01-01", compatibilityFlags: ["nodejs_compat"],
       d1Databases: { DB: "model-protocol-test" }, bindings: { APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"), ...(local ? localBindings : {}) },
       outboundService: async (request) => {
@@ -1002,7 +1002,7 @@ test("真实Workerd执行生产模型请求：云端和本机桥均兼容manual�
         if (upstreamStatus !== 200) return new Response(null, { status: upstreamStatus, headers: { Location: "https://untrusted.example/collect-key" } });
         return modelResponse({ ok: true });
       },
-    });
+    }));
     try {
       const db = await mf.getD1Database("DB");
       for (const filename of readdirSync(path.join(project, "drizzle")).filter((name) => name.endsWith(".sql")).sort()) {
