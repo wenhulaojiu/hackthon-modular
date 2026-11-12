@@ -18,6 +18,7 @@ const requireSchema = name => {
   if (name === '@/lib/competition-demo') { const module = { exports: {} }; new Function('require', 'module', 'exports', compile('../lib/competition-demo.ts'))(nativeRequire, module, module.exports); return module.exports; }
   if (name === '@/lib/reply-catalog') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/reply-catalog.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(dependency => dependency === './reply-money-core.mjs' ? replyMoney : nativeRequire(dependency), module, module.exports); return module.exports; }
   if (name === '@/lib/reply-money') return replyMoney;
+  if (name === '@/lib/guide-knowledge') return { guideReply: () => null };
   if (name.startsWith('@/')) throw new Error(`未声明的测试依赖：${name}`);
   return nativeRequire(name);
 };

@@ -10,6 +10,7 @@ import { assessReplyContext, CLARIFY_REPLY } from '@/lib/reply-context';
 import { suggestCatalogReply, isGenericRecommendationRequest } from '@/lib/reply-catalog';
 import { unverifiedReplyAmounts } from '@/lib/reply-money';
 import { migrateCompetitionCatalog } from '@/lib/competition-demo';
+import { guideReply } from '@/lib/guide-knowledge';
 
 const MAX_STATE_BYTES = 1_500_000;
 const MAX_MESSAGES = 12_000;
@@ -57,6 +58,20 @@ export const aiSettingsSchema = z.object({
 }).strict();
 
 const faqSchema = z.object({ question: z.string().min(1).max(500), answer: z.string().min(1).max(4000) }).strict();
+const babyProfileSchema = z.object({
+  name: z.string().max(80).optional(), birthDate: optionalDate, ageMonths: z.number().int().min(0).max(72).optional(),
+  feeding: z.enum(["breast", "mixed", "formula", ""]).optional(),
+  formulaStage: z.enum(["1段", "2段", "3段", "4段", ""]).optional(),
+  allergies: z.string().max(500).optional(), notes: z.string().max(1000).optional(),
+}).strict();
+const guideTopicSchema = z.object({ id: z.string().min(1).max(120), title: z.string().min(1).max(200), keywords: z.array(z.string().min(1).max(80)).max(30), answer: z.string().max(4000), enabled: z.boolean() }).strict();
+export const guideKnowledgeSchema = z.object({
+  topics: z.array(guideTopicSchema).max(50),
+  policy: z.object({
+    openedRefund: z.string().max(500), smallCanRefund: z.string().max(500), medicalBoundary: z.string().max(1000),
+    competitorPolicy: z.string().max(1000), storeAddress: z.string().max(500), revisitScript: z.string().max(1000),
+  }).strict(),
+}).strict();
 export const productSchema = z.object({ id, name: z.string().min(1).max(160), type: z.enum(["product", "service"]), price: z.number().finite().min(0).max(100_000_000).nullable(), stock: z.number().int().min(0).max(1_000_000_000).nullable().optional(), restockThreshold: z.number().int().min(0).max(1_000_000_000).optional(), description: z.string().max(8000), faq: z.array(faqSchema).max(30), enabled: z.boolean(), needsRestock: z.boolean().optional(), source: z.enum(['demo', 'manual']).optional() }).strict();
 const clockSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const replySettingsSchema = z.object({
@@ -75,6 +90,7 @@ const customerSchema = z.object({
   createdAt: date, lastContactAt: optionalDate, nextFollowUpAt: optionalDate,
   source: z.enum(["demo", "manual", "wechat"]),
   autoReplyEnabled: z.boolean().optional(), humanTakeover: z.boolean().optional(),
+  memberId: z.string().max(80).optional(), phone: z.string().max(40).optional(), baby: babyProfileSchema.optional(),
   evidence: z.array(z.object({ id, text: z.string().max(4000), date: optionalDate, source: shortText }).strict()).max(100),
   messages: z.array(z.object({ id, sender: z.enum(["customer", "merchant"]), text: z.string().min(1).max(8000), date: optionalDate }).strict()).max(1500),
 }).strict();
@@ -88,12 +104,13 @@ export const appStateSchema = z.object({
   tasks: z.array(z.object({
     id, customerId: id, title: z.string().min(1).max(300), date, kind: z.enum(["followup", "marketing", "reminder"]),
     status: z.enum(["todo", "done"]), priority: z.enum(["high", "normal"]), script: longText,
+    babyMilestoneId: z.string().max(80).optional(),
   }).strict()).max(5000),
   settings: z.object({ storeName: z.string().min(1).max(120), industry: z.string().max(120), followupDays: z.number().int().min(1).max(365), ai: aiSettingsSchema }).strict(),
   imports: z.array(z.object({ id, fileName: z.string().min(1).max(300), date, customerCount: z.number().int().nonnegative().max(500), messageCount: z.number().int().nonnegative().max(MAX_MESSAGES) }).strict()).max(500),
   exports: z.array(z.object({ id, fileName: z.string().min(1).max(300), date, kind: z.enum(['json', 'customers', 'orders', 'tasks']), customerCount: z.number().int().nonnegative().max(500), messageCount: z.number().int().nonnegative().max(MAX_MESSAGES) }).strict()).max(500).optional(),
   demo: z.boolean(),
-  products: z.array(productSchema).max(200).optional(), replySettings: replySettingsSchema.optional(),
+  products: z.array(productSchema).max(200).optional(), replySettings: replySettingsSchema.optional(), guideKnowledge: guideKnowledgeSchema.optional(),
 }).strict().superRefine((state, ctx) => {
   const customerIds = new Set(state.customers.map((customer) => customer.id));
   if ([state.customers, state.orders, state.tasks, state.imports, state.products || []].some((rows) => new Set(rows.map((row) => row.id)).size !== rows.length)) {
@@ -495,7 +512,18 @@ export async function runReplyAI(userId: string, input: z.infer<typeof replyRequ
   if (!replyHoursOpen(settings.businessHours)) return handoffReply("当前不在配置的营业时间内。");
   const incomingMessages = input.messages || [input.message];
   if (incomingMessages.some((message) => NON_TRANSACTION_PREFIX.test(message.text))) return handoffReply("引用、转发或支付卡片不能作为客户本人请求自动处理。");
-  if (incomingMessages.some((message) => SENSITIVE_REPLY.test(message.text) || settings.handoffKeywords.some((word) => message.text.toLowerCase().includes(word.toLowerCase())))) return handoffReply("涉及售后、改价或需人工处理的事项。");
+  // 门店自定义的转人工关键词优先级最高，知识库规则不能绕过它。
+  const handoffRequested = incomingMessages.some((message) => settings.handoffKeywords.some((word) => message.text.toLowerCase().includes(word.toLowerCase())));
+  // 导购知识库规则先于售后判断与模型：医疗边界、主观排名、政策咨询等使用可核验的确定性回复。
+  const guide = handoffRequested ? null : guideReply(incomingMessages.map((message) => message.text).join("\n"), {
+    knowledge: state.guideKnowledge,
+    products: (state.products || []).filter((product) => product.enabled),
+    storeAddress: settings.storeInfo?.address ?? "",
+    maxReplyChars: settings.maxReplyChars,
+    customerName: customer.name,
+  });
+  if (guide) return guide;
+  if (handoffRequested || incomingMessages.some((message) => SENSITIVE_REPLY.test(message.text))) return handoffReply("涉及售后、改价或需人工处理的事项。");
   const sources: Array<{ id: string; text: string; productId?: string }> = [];
   const conversation = input.context ?? customer.messages.slice(-20).map(({ sender, text, date }) => ({ sender, text: text.slice(0, 4000), date }));
   const products = (state.products || []).filter((product) => product.enabled);

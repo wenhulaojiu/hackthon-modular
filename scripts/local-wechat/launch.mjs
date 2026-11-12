@@ -135,7 +135,7 @@ function stopServer() {
 async function launchServer() {
   await assertPortFree();
   const launchId = randomUUID();
-  server = spawn(process.execPath, [path.join(projectRoot, 'scripts', 'run-framework.mjs'), 'dev', '--hostname', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: projectRoot, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KEXU_LOCAL_WECHAT: '1', KEXU_LOCAL_LAUNCH_ID: launchId, NO_COLOR: '1' } });
+  server = spawn(process.execPath, [path.join(projectRoot, 'scripts', 'run-framework.mjs'), 'dev', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: projectRoot, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KEXU_LOCAL_WECHAT: '1', KEXU_LOCAL_LAUNCH_ID: launchId, NO_COLOR: '1' } });
   let ended = false;
   let failure = '';
   const completion = new Promise(resolve => {

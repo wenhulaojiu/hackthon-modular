@@ -7,6 +7,8 @@ import { DEFAULT_RESTOCK_THRESHOLD, isProductLowStock, selectCatalogProducts, ty
 import { loadSavedReplyConfig, localRepliesAvailable, replyRequest, replySettingsFor, WEEKDAYS } from '../05-自动回复/reply-ui';
 import { assertWorkspaceCurrent, captureWorkspace } from '../../lib/client-workspace';
 import { buildWelcomeMessage, MAX_WELCOME_LENGTH, welcomeMessageError, welcomeSettingsFor } from '../05-自动回复/welcome-message';
+import { documentToProducts, type ParsedDocument } from '../../lib/file-import';
+import FileImportButton from '../09-公共工具与样式/file-import-button';
 import './products.css';
 
 type FAQ = { question: string; answer: string };
@@ -82,6 +84,13 @@ export default function Products({ state, onChange, notify }: SharedProps) {
     finally { setSaving(false); }
   };
 
+  const importProducts = async (documents: ParsedDocument[]) => {
+    const latest = stateRef.current;
+    const { products, skipped } = documentToProducts(documents, latest.products ?? []);
+    if (!products.length) { notify('未识别到新商品或服务', true); return; }
+    await persistKnowledge({ ...latest, products: [...(latest.products ?? []), ...products] }, `已导入 ${products.length} 项${skipped ? `，跳过 ${skipped} 条重复` : ''}`);
+  };
+
   const deleteProduct = async (product: Product) => {
     if (saving || savingInfo || !window.confirm(`删除“${product.name}”的资料？已产生的回复记录会保留。`)) return;
     setSaving(true);
@@ -105,7 +114,7 @@ export default function Products({ state, onChange, notify }: SharedProps) {
     finally { setSavingInfo(false); }
   };
 
-  return <div className="reply-knowledge-page"><div className="reply-product-actions"><button className="btn primary" disabled={saving || savingInfo} onClick={() => openProduct()}><Plus size={16} />新增商品或服务</button></div>
+  return <div className="reply-knowledge-page"><div className="reply-product-actions"><FileImportButton notify={notify} label="上传文件" onImport={importProducts} /><button className="btn primary" disabled={saving || savingInfo} onClick={() => openProduct()}><Plus size={16} />新增商品或服务</button></div>
     <div className="reply-knowledge-layout"><div className="reply-knowledge-main"><div className="reply-knowledge-stats"><div><Package size={18} /><span>商品资料<strong>{products.filter(item => item.type === 'product').length}</strong></span></div><div><Sparkles size={18} /><span>服务项目<strong>{products.filter(item => item.type === 'service').length}</strong></span></div><div><AlertCircle size={18} /><span>待补货商品<strong>{products.filter(isProductLowStock).length}</strong></span></div></div><section className="card reply-product-list"><div className="reply-product-toolbar"><div className="tabs">{[{ id: 'all', label: '全部资料' }, { id: 'product', label: '商品' }, { id: 'service', label: '服务' }, { id: 'restock', label: '待补货商品' }].map(item => <button key={item.id} className={`tab ${filter === item.id ? 'active' : ''}`} onClick={() => setFilter(item.id as typeof filter)}>{item.label}</button>)}</div><div className="reply-product-tools"><select className="input reply-product-sort" aria-label="商品排序" value={sort} onChange={event => setSort(event.target.value as CatalogSort)}><option value="default">默认排序</option><option value="stock-asc">库存量从少到多</option><option value="stock-desc">库存量从多到少</option><option value="price-asc">价格从低到高</option><option value="price-desc">价格从高到低</option></select><div className="reply-search"><Search size={15} /><input aria-label="搜索商品或服务" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称或描述" /></div></div></div>{visible.length ? <div className="reply-products-grid">{visible.map(product => <article key={product.id} className={`reply-product-card ${product.enabled ? '' : 'disabled'}`}><div className="reply-product-top"><span className={`reply-product-icon ${product.type}`}>{product.type === 'service' ? <Sparkles size={20} /> : <Package size={20} />}</span><span className={`badge ${product.enabled ? 'green' : 'slate'}`}>{product.enabled ? '已启用' : '已停用'}</span>{isProductLowStock(product) && <span className="reply-product-restock">待补货</span>}<div><button className="icon-button" disabled={saving || savingInfo} aria-label={`编辑${product.name}`} onClick={() => openProduct(product)}><Pencil size={14} /></button><button className="icon-button danger-text" disabled={saving || savingInfo} aria-label={`删除${product.name}`} onClick={() => { void deleteProduct(product); }}><Trash2 size={14} /></button></div></div><span className="reply-product-kind">{product.type === 'service' ? '服务项目' : '商品'}</span><h3>{product.name}</h3><strong className="reply-product-price">{product.price === null ? <small>需要人工报价</small> : `¥${product.price.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`}</strong>{product.type === 'product' && <p className="reply-product-stock">库存：{product.stock == null ? '未填写' : product.stock.toLocaleString('zh-CN')}</p>}<p className="reply-product-description">{product.description}</p></article>)}</div> : <div className="empty-state"><Package size={29} /><h3>{products.length ? '没有找到匹配资料' : '先添加一项真实商品或服务'}</h3><p>{products.length ? '试试其他关键词。' : '描述服务内容、实际价格和常见问题，AI 才能准确回应客户。'}</p>{!products.length && <button className="btn secondary" onClick={() => openProduct()}><Plus size={14} />新增商品或服务</button>}</div>}</section></div>
     <aside className="reply-business-aside"><section className="card reply-business-card reply-store-information"><div className="reply-card-title"><Store size={18} /><h3>店铺基础信息</h3></div>
       <form onSubmit={event => { event.preventDefault(); void saveBusinessInfo(); }}><fieldset className="reply-store-fields" disabled={savingInfo || saving}>

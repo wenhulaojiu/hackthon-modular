@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import {ArrowDownToLine,ArrowRight,ArrowUpRight,Bell,Bot,CheckCircle2,ChevronDown,ChevronRight,CircleHelp,LayoutDashboard,Loader2,Menu,MessageCircle,Package,Search,Settings2,ShieldCheck,Upload,Users,X} from 'lucide-react';
+import {ArrowDownToLine,ArrowRight,ArrowUpRight,Bell,BookOpen,Bot,CheckCircle2,ChevronDown,ChevronRight,CircleHelp,LayoutDashboard,Loader2,Menu,MessageCircle,Package,Search,Settings2,ShieldCheck,Upload,Users,X} from 'lucide-react';
 import type {AIResult,AiAction,AppState,ExportRecord,PageId,SharedProps} from '../lib/types';
 import {today} from '../lib/domain';
 import {day} from '../页面模块/09-公共工具与样式/ui';
@@ -12,11 +12,12 @@ import Inbox from '../页面模块/04-微信数据/inbox';
 import AutoReply from '../页面模块/05-自动回复/auto-reply';
 import Products from '../页面模块/06-商品与服务/products';
 import DataExport from '../页面模块/08-数据导出/data-export';
+import KnowledgeBase from '../页面模块/10-知识库/knowledge-base';
 import {assertWorkspaceCurrent,captureWorkspace,getWorkspaceInvalidation,registerWorkspaceController,setWorkspaceToken,subscribeWorkspaceInvalidation,workspaceFetch,type WorkspaceSnapshot} from '../lib/client-workspace';
 import {mergeRuntimeEdit,mergeRuntimeRefresh} from '../lib/runtime-state-refresh';
 
 async function json(r:Response){return await r.json() as AIResult & {state:AppState;revision:number;hasApiKey:boolean;error?:string;workspaceToken?:string;code?:string};}
-const nav=[{id:'overview',text:'总览',icon:LayoutDashboard},{id:'customers',text:'客户档案',icon:Users},{id:'marketing',text:'客户跟进',icon:MessageCircle},{id:'inbox',text:'微信数据',icon:Upload},{id:'auto-reply',text:'自动回复',icon:Bot},{id:'products',text:'商品与服务',icon:Package},{id:'settings',text:'AI 与设置',icon:Settings2}] as const;
+const nav=[{id:'overview',text:'总览',icon:LayoutDashboard},{id:'customers',text:'客户档案',icon:Users},{id:'marketing',text:'客户跟进',icon:MessageCircle},{id:'inbox',text:'微信数据',icon:Upload},{id:'auto-reply',text:'自动回复',icon:Bot},{id:'products',text:'商品与服务',icon:Package},{id:'knowledge',text:'知识库',icon:BookOpen},{id:'settings',text:'AI 与设置',icon:Settings2}] as const;
 export default function MerchantApp({displayName}:{displayName:string}){
   const [state,setState]=useState<AppState|null>(null),[page,setPage]=useState<PageId>('overview'),[selectedId,setSelectedId]=useState<string|null>(null),[hasApiKey,setHasApiKey]=useState(false),[saveStatus,setSaveStatus]=useState('正在加载'),[loadError,setLoadError]=useState(''),[toast,setToast]=useState<{text:string;error:boolean}|null>(null),[mobileNav,setMobileNav]=useState(false),[exportOpen,setExportOpen]=useState(false);
   const [workspace,setWorkspace]=useState<WorkspaceSnapshot|null>(null),[workspaceError,setWorkspaceError]=useState('');
@@ -87,6 +88,6 @@ export default function MerchantApp({displayName}:{displayName:string}){
     <div className="workspace">
     <main className="main-content"><div className="page-heading"><div><h1>{page==='overview'?'总览':nav.find(n=>n.id===page)?.text}</h1></div><div className="heading-actions"><button className="icon-button mobile-menu" onClick={()=>setMobileNav(true)} aria-label="展开菜单"><Menu size={20}/></button>{saveStatus==='保存失败'&&<span className="save-label error" role="alert">保存失败</span>}</div></div>
     {workspaceError&&<div className="workspace-changed-banner" role="alert"><div><strong>请重新加载微信数据工作空间</strong><p>{workspaceError}</p></div><button className="btn primary" onClick={()=>window.location.reload()}>刷新工作空间</button></div>}
-    <div inert={!!workspaceError}>{page==='overview'&&<Overview {...props} go={go}/>} {page==='customers'&&<Customers {...props} selectedId={selectedId} onSelect={setSelectedId}/>} {page==='marketing'&&<Marketing {...props} go={go}/>} {page==='inbox'&&<Inbox {...props} go={go} onExport={()=>setExportOpen(true)}/>} {page==='auto-reply'&&<AutoReply {...props}/>} {page==='products'&&<Products {...props}/>} {page==='settings'&&<Settings {...props} hasApiKey={hasApiKey} onSaveKey={onSaveKey} onExport={()=>setExportOpen(true)}/>}</div>
+    <div inert={!!workspaceError}>{page==='overview'&&<Overview {...props} go={go}/>} {page==='customers'&&<Customers {...props} selectedId={selectedId} onSelect={setSelectedId}/>} {page==='marketing'&&<Marketing {...props} go={go}/>} {page==='inbox'&&<Inbox {...props} go={go} onExport={()=>setExportOpen(true)}/>} {page==='auto-reply'&&<AutoReply {...props}/>} {page==='products'&&<Products {...props}/>} {page==='knowledge'&&<KnowledgeBase {...props}/>} {page==='settings'&&<Settings {...props} hasApiKey={hasApiKey} onSaveKey={onSaveKey} onExport={()=>setExportOpen(true)}/>}</div>
     </main></div><DataExport state={state} open={exportOpen} onClose={()=>setExportOpen(false)} notify={notify} prepareState={prepareExportState} onExported={recordExport}/>{toast&&<div className={'toast '+(toast.error?'error':'')} role="status">{toast.error?<CircleHelp size={18}/>:<CheckCircle2 size={18}/>}<span>{toast.text}</span><button onClick={()=>setToast(null)} aria-label="关闭通知"><X size={15}/></button></div>}</div>;
 }

@@ -1,7 +1,7 @@
 customer_id,customer_name,wechat_id,timestamp,sender,content
-example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:20:00+08:00,customer,"想选浅烘咖啡礼盒，预算300元左右。"
-example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:22:00+08:00,merchant,"浅烘双拼礼盒268元，包装可以做得简洁一些。"
-example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:25:00+08:00,customer,"已经支付268元，请帮我留一盒。
+example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:20:00+08:00,customer,"想选1段婴儿配方奶粉，宝宝2个月，预算300元左右。"
+example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:22:00+08:00,merchant,"1段婴儿配方奶粉268元，冲调说明和配料表可以先发您核对。"
+example-customer-01,示例客户·小夏,wx_example_xiaoxia,2026-11-07T09:25:00+08:00,customer,"已经支付268元，请帮我留一罐。
 周末我来店里取，谢谢。"
-example-customer-02,示例客户·予安,wx_example_yuan,2026-11-07T10:00:00+08:00,customer,"米白色杯子多少钱？我先了解一下，还没有决定买。"
-example-customer-02,示例客户·予安,wx_example_yuan,2026-11-07T10:02:00+08:00,merchant,"这款198元，您可以先看尺寸和实物图。"
+example-customer-02,示例客户·予安,wx_example_yuan,2026-11-07T10:00:00+08:00,customer,"2段婴儿配方奶粉多少钱？宝宝快6个月，想了解一下换段。"
+example-customer-02,示例客户·予安,wx_example_yuan,2026-11-07T10:02:00+08:00,merchant,"这款198元，月龄、段位与转奶时间请按包装说明与儿科医生建议核对。"

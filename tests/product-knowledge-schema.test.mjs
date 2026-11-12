@@ -20,6 +20,7 @@ const requireSchema = name => {
   if (name === '@/lib/competition-demo') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/competition-demo.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(nativeRequire, module, module.exports); return module.exports; }
   if (name === '@/lib/reply-catalog') { const module = { exports: {} }; const compiled = ts.transpileModule(readFileSync(new URL('../lib/reply-catalog.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText; new Function('require', 'module', 'exports', compiled)(dependency => dependency === './reply-money-core.mjs' ? replyMoney : nativeRequire(dependency), module, module.exports); return module.exports; }
   if (name === '@/lib/reply-money') return replyMoney;
+  if (name === '@/lib/guide-knowledge') return { guideReply: () => null };
   if (name.startsWith('@/')) throw new Error(`未声明的测试依赖：${name}`);
   return nativeRequire(name);
 };
@@ -65,4 +66,19 @@ test('库存保留未知与零的区别，库存和补货提醒值拒绝负数�
     assert.equal(productSchema.parse({ ...product, [field]: 1_000_000_000 })[field], 1_000_000_000);
   }
   assert.equal(productSchema.safeParse({ ...product, restockThreshold: null }).success, false);
+});
+
+test('导购知识库与客户身份字段可持久化，额外字段仍被严格拒绝', () => {
+  const knowledge = {
+    topics: [{ id: 'dha', title: 'DHA 与鱼油的区别', keywords: ['DHA', '鱼油'], answer: '用生活化语言解释，不用化学式', enabled: true }],
+    policy: { openedRefund: '产品拆封后不予退款', smallCanRefund: '只有小罐装产品适用特殊退款政策', medicalBoundary: '建议直接就医', competitorPolicy: '不评价其他品牌', storeAddress: '合成地址', revisitScript: '了解宝宝近况' },
+  };
+  const customer = { id: 'c1', name: '合成客户', wechatId: '', color: '#123456', stage: '新客户', tags: [], manualTags: [], summary: '', preferences: '', budget: '', note: '', createdAt: '2026-11-07', lastContactAt: '', nextFollowUpAt: '', source: 'manual', autoReplyEnabled: true, humanTakeover: false, evidence: [], messages: [], memberId: 'A1024', phone: '13800000000' };
+  const state = { schemaVersion: 1, customers: [customer], orders: [], tasks: [], imports: [], demo: false, settings: { storeName: '合成店铺', industry: '', followupDays: 7, ai: { baseUrl: '', model: '', temperature: 0, profilePrompt: '', marketingPrompt: '', extractionPrompt: '' } }, guideKnowledge: knowledge };
+  const saved = appStateSchema.parse(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(saved.guideKnowledge, knowledge);
+  assert.equal(saved.customers[0].memberId, 'A1024');
+  assert.equal(saved.customers[0].phone, '13800000000');
+  assert.equal(appStateSchema.safeParse({ ...state, guideKnowledge: { ...knowledge, extra: 1 } }).success, false);
+  assert.equal(appStateSchema.safeParse({ ...state, customers: [{ ...customer, extra: 1 }] }).success, false);
 });

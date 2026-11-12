@@ -1,0 +1,38 @@
+name: 发布本地预览版
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run package:local
+      - name: 发布预览下载包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum public/kexu-local.zip > public/SHA256SUMS.txt
+          cat > release-notes.md <<'EOF'
+          母婴导购 AI 预览版：宝宝档案、月龄里程碑、回访待办、文档式知识库与本地文件上传。
+
+          下载 kexu-local.zip 并完整解压；安装 Node.js 24（64 位），双击「启动客序预览.cmd」，首次启动需联网安装依赖。浏览器访问 http://127.0.0.1:5183/。
+
+          这是本地运行源码包，不是免安装 EXE。AI 功能需配置自己的模型接口与密钥；查看演示无需微信组件。演示数据为虚构数据，未使用真实微信验收。
+
+          发布前执行类型检查、自动化测试和生产构建。附件不含数据库、密钥、依赖与运行日志。
+          EOF
+          gh release create v0.2.0-preview.1 public/kexu-local.zip public/SHA256SUMS.txt --target "$GITHUB_SHA" --title "客序 v0.2.0-preview.1 · 母婴导购 AI 预览版" --notes-file release-notes.md --prerelease
