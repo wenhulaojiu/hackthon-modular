@@ -18,6 +18,12 @@
 
 首次打开包含16位虚构客户、近30天订单、待确认收款与退款、8条任务。演示数据标记为 `demo`，日期随上海当天日期生成；请勿把演示订单当作真实经营数据。默认演示数据为母婴行业：客户含宝宝档案、月龄里程碑与回访待办，商品与服务也按母婴场景预置。
 
+## 前后端架构
+
+![客序前后端架构图](docs/architecture.svg)
+
+线上使用 Cloudflare Workers + D1；本地使用 Vite + 本地 Worker / D1，并提供微信提取桥接。
+
 ## 下载预览版（Windows）
 
 前往 [Releases 下载页面](https://github.com/wenhulaojiu/hackthon-modular/releases)，下载最新预览版附件 `kexu-local.zip`，完整解压到普通文件夹。
