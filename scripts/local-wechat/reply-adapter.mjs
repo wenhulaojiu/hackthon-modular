@@ -4,7 +4,7 @@ import path from 'node:path';
 import { assertAdditiveEnrollment, isEnrollmentChatId, isFriendAddedSystemText } from './reply-enrollment.mjs';
 
 // 收件复用只读导出组件；发送网关须由用户另行安装并在本机验收。
-export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace, nativeSender } = {}) {
+export function createReplyAdapter({ root, reader, fetch: request = globalThis.fetch, now = Date.now, workspace, currentWorkspace, nativeSender, excludedChatIds = () => [] } = {}) {
   let config;
   let startedAt = 0;
   let paused = true;
@@ -290,7 +290,7 @@ export function createReplyAdapter({ root, reader, fetch: request = globalThis.f
     if (!Array.isArray(chats) || chats.length > 2000) throw new Error('新私聊目录无法核验，已停止自动接纳。');
     const known = new Set(config.customers.map(customer => customer.wechatId));
     const candidates = new Map();
-    for (const chat of chats) if (chat?.type === 'private' && (chat.inbound === true && chat.lastIncomingAt >= startedAt || chat.systemChanged === true && chat.lastSystemAt >= startedAt) && isEnrollmentChatId(chat.id) && !known.has(chat.id) && watermarks.get(chat.id) !== chat.watermark && !candidates.has(chat.id)) candidates.set(chat.id, { wechatId: chat.id, name: typeof chat.name === 'string' && chat.name.trim() ? chat.name.slice(0, 120) : chat.id });
+    for (const chat of chats) if (chat?.type === 'private' && (chat.inbound === true && chat.lastIncomingAt >= startedAt || chat.systemChanged === true && chat.lastSystemAt >= startedAt) && isEnrollmentChatId(chat.id) && !known.has(chat.id) && !excludedChatIds().includes(chat.id) && watermarks.get(chat.id) !== chat.watermark && !candidates.has(chat.id)) candidates.set(chat.id, { wechatId: chat.id, name: typeof chat.name === 'string' && chat.name.trim() ? chat.name.slice(0, 120) : chat.id });
     const capacity = Math.max(0, 500 - config.customers.length);
     if (!capacity || !candidates.size) return empty;
     const unknown = [...candidates.keys()];

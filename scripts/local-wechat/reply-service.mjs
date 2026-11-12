@@ -1,3 +1,4 @@
+import { createHumanRelay } from './human-relay.mjs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -15,7 +16,8 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   const requestLocalAPI = request;
   if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1') throw new Error('接待后台只能请求同一本机服务。');
   if (workspace && workspace.id !== 'legacy' && !/^acct-[a-f0-9]{20}$/.test(workspace.id)) throw new Error('接待工作区标识不正确。');
-  const adapter = suppliedAdapter || createReplyAdapter({ root, reader, fetch: request, workspace, currentWorkspace, nativeSender });
+  let relay;
+  const adapter = suppliedAdapter || createReplyAdapter({ root, reader, fetch: request, workspace, currentWorkspace, nativeSender, excludedChatIds: () => relay ? [relay.salesChatId()] : [] });
   let closed = false;
   let polling = null;
   let runEpoch = 0;
@@ -111,6 +113,16 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
   };
   const engine = await createReplyEngine({ directory: queueDirectory, send: input => { assertCurrent(); return adapter.send(input); }, ...(typeof adapter.sendManual === 'function' ? { sendManual: input => { assertCurrent(); return adapter.sendManual(input); } } : {}), generate, restoreManual, syncManualProtection: async config => { assertCurrent(); await adapter.syncConfig(config); } });
 
+  relay = await createHumanRelay({ directory: queueDirectory, engine, reader, assertCurrent,
+    notify: input => adapter.sendManual(input),
+    answer: async input => {
+      const response = await requestLocalAPI(`${address.origin}${PREFIX}/manual`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(75000), headers: { ...localHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+      const result = await response.json(); assertCurrent();
+      if (!response.ok || !result.job) throw new LocalError(409, '人工答案未完成发送，请核查。');
+      return result.job;
+    },
+  });
+
   async function pause() {
     runEpoch += 1; pollController?.abort();
     // 同步封禁适配器并停止引擎，不强杀已经进入原生调用的任务。
@@ -122,7 +134,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
 
   async function status() {
     assertCurrent();
-    const result = { ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000), ...(stateRevision !== undefined ? { stateRevision } : {}), ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}) };
+    const result = { relay: relay.status(), ...await engine.status(), adapter: await adapter.status({ probe: true }), pollIntervalSeconds: Math.round(pollMs / 1000), ...(stateRevision !== undefined ? { stateRevision } : {}), ...(workspace ? { active: workspace, workspaceToken: workspace.workspaceToken } : {}) };
     assertCurrent();
     return result;
   }
@@ -138,6 +150,7 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
         assertCurrent();
         let config = await engine.getConfig();
         await adapter.syncConfig(config);
+        await relay.tick();
         const events = await adapter.poll();
         assertCurrent();
         // 读取期间暂停或关闭后，不再将刚读出的新消息加入接待队列。
@@ -201,11 +214,13 @@ export async function createLocalReplyService({ root, reader, origin, fetch: req
         const input = await readLocalBody(request, route === '/config' ? 1_400_000 : 24_000);
         checkWorkspace(request);
         const empty = () => { if (!input || Array.isArray(input) || typeof input !== 'object' || Object.keys(input).length) throw new LocalError(400, '此操作不接收额外参数。'); };
-        if (route === '/config') {
+        if (route === '/relay') { await relay.configure(input); }
+        else if (route === '/config') {
           // 配置变更先停发，避免规则校验与后台发送交叉；需商家确认后重新启动。
           await pause();
           assertCurrent();
           if (input?.settings?.mode === 'auto' && !(await adapter.status({ probe: true })).canSend) throw new LocalError(409, '自动发送尚未接通，请使用草稿接待。');
+          if (relay.salesChatId() && input?.customers?.some(c => c.wechatId === relay.salesChatId())) throw new LocalError(409, '销售A不能放入客户档案或接待范围。');
           await engine.syncConfig(input);
           const config = await engine.getConfig();
           assertCurrent();

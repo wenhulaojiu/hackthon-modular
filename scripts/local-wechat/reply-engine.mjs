@@ -819,5 +819,6 @@ export async function createReplyEngine(options = {}) {
 
   async function getConfig() { await chain; return copy(state.config); }
   async function getJob(jobId) { if (!safeId(jobId)) fail("跟进任务编号不正确。"); await chain; const job = state.jobs.find(item => item.id === jobId); return job ? publicJob(job) : null; }
-  return { syncConfig, enrollCustomers, enqueueWelcome, enqueueFollowup, prepareManual, dispatchManual, getManualRequest, manualResumeAudit, requestManualResume, getConfig, getJob, start, pause, ingest, status, claimWork, completeWork, approve, reject, takeover, close };
+  async function relayJobs() { await chain; return state.jobs.map(publicJob); }
+  return { relayJobs, syncConfig, enrollCustomers, enqueueWelcome, enqueueFollowup, prepareManual, dispatchManual, getManualRequest, manualResumeAudit, requestManualResume, getConfig, getJob, start, pause, ingest, status, claimWork, completeWork, approve, reject, takeover, close };
 }
