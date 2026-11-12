@@ -24,6 +24,14 @@
 
 线上使用 Cloudflare Workers + D1；本地使用 Vite + 本地 Worker / D1，并提供微信提取桥接。
 
+## 团队协作与微信助手目标架构（规划）
+
+保留上方当前架构。目标产品为老板网页总览、销售小程序工作台、销售电脑微信采集服务共用后台。客户由来源销售自动建档并绑定，新增“疑难问题转给助手微信 → 销售引用回复 → 系统转回原客户”的人工协助闭环。
+
+![团队协作与微信助手目标架构](docs/architecture-target.svg)
+
+详见 [团队协作与微信助手架构说明](docs/architecture-target.md)，包含可编辑流程图、各端职责和功能边界。云端同步、团队权限、小程序和助手转交均为待开发能力。
+
 ## 下载预览版（Windows）
 
 前往 [Releases 下载页面](https://github.com/wenhulaojiu/hackthon-modular/releases)，下载最新预览版附件 `kexu-local.zip`，完整解压到普通文件夹。
