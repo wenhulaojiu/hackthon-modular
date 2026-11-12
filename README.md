@@ -32,6 +32,12 @@
 
 详见 [团队协作与 A/B 双微信架构说明](docs/architecture-target.md)，包含可编辑流程图、各端职责和功能边界。云端同步、团队权限、小程序和A/B 转交均为待开发能力。
 
+### A/B 微信疑难问题详细流程
+
+![A/B微信疑难问题处理流程](docs/architecture-ab-flow.svg)
+
+[详细架构与各端职责](docs/architecture-target.md) · [保留的上一版目标概览](docs/architecture-target-overview.svg)。详细图展开认证权限、同步归属、业务服务、数据模型、工单匹配和异常回执；A/B闭环仍待开发。
+
 ## 下载预览版（Windows）
 
 前往 [Releases 下载页面](https://github.com/wenhulaojiu/hackthon-modular/releases)，下载最新预览版附件 `kexu-local.zip`，完整解压到普通文件夹。
