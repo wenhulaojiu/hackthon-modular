@@ -864,3 +864,68 @@ dialog .row > span:last-child {
   font-weight: normal;
   color: #7b8974;
 }
+
+/* ==== 2026-11-13 评审改版 ==== */
+/* 全局字号放大 */
+body { font-size: 16px; }
+h1 { font-size: 26px; }
+h2 { font-size: 19px; }
+button, input, textarea, select { font-size: 15px; }
+.muted, .notice, .badge { font-size: 13px; }
+
+/* 门店卡片：浅绿底区分白背景 */
+.store-card { background: #f0f6e9; border-color: #d9e6cb; transition: box-shadow .16s, border-color .16s; }
+.store-card:hover { border-color: #b9d29e; box-shadow: 0 6px 18px #4a6b2f14; }
+.store-detail-button { background: #e2efd6; border-color: #c8dcaf; color: #3f6428; font-weight: 600; }
+.store-detail-button:hover { background: #7b9e29; border-color: #7b9e29; color: #fff; }
+
+/* 活动选门店 / 待办：前置小方块 + 后置大勾选框，选中绿对号 */
+.campaign-store-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.campaign-store { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #f5f8f0; border: 1px solid #dce5d8; border-radius: 12px; padding: 14px 16px; cursor: pointer; transition: background .15s, border-color .15s; }
+.campaign-store.checked { background: #e9f3dd; border-color: #9cbf6f; }
+.campaign-store-name { font-weight: 600; font-size: 16px; }
+.campaign-check, .todo-check { appearance: none; -webkit-appearance: none; width: 28px; height: 28px; margin: 0; border: 2px solid #b9cbaa; border-radius: 8px; background: #fff; cursor: pointer; flex-shrink: 0; display: inline-grid; place-items: center; transition: background .15s, border-color .15s; }
+.campaign-check::after, .todo-check::after { content: "✓"; font-size: 18px; font-weight: 700; color: #fff; opacity: 0; transform: scale(.6); transition: opacity .12s, transform .12s; }
+.campaign-check:checked, .todo-check:checked { background: #7b9e29; border-color: #7b9e29; }
+.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; transform: scale(1); }
+.todo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 6px; border-bottom: 1px solid #e7ede2; cursor: pointer; }
+.todo-row:last-child { border-bottom: 0; }
+.todo-text { flex: 1; font-size: 15px; }
+.todo-row.checked .todo-text { color: #8a967f; text-decoration: line-through; }
+
+/* 返回上一级链接 */
+.back-link { display: inline-flex; margin-bottom: 12px; background: transparent; border: 0; color: #557b46; font-weight: 600; padding: 4px 0; }
+.back-link:hover { background: transparent; color: #7b9e29; }
+
+/* 员工小程序：顾客横条带偏好摘要 */
+.employee-customer-row { display: flex; align-items: center; gap: 12px; }
+.customer-row-main { flex: 1; min-width: 0; }
+.customer-note { margin: 4px 0 0; font-size: 13px; color: #7b8974; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* 员工首页：门店纯文字信息条（取代原大卡片） */
+.employee-store-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 16px; }
+.employee-store-line b { font-size: 19px; color: #24392d; }
+.employee-store-line .muted { font-size: 13px; }
+
+/* 首页折线图 */
+.home-line-chart { display: block; width: 100%; height: auto; margin-top: 8px; }
+
+/* 网页端知识库双栏 */
+.knowledge-web { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.kb-column { padding: 20px; }
+.kb-column-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.kb-column-head h2 { margin: 0; }
+.kb-column input { margin: 12px 0; }
+.kb-group-title { margin: 18px 0 8px; font-size: 15px; color: #557b46; }
+.kb-entry { border: 1px solid #e1e9da; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: #fafcf7; }
+.kb-entry:hover { border-color: #b9d29e; }
+.kb-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kb-entry-head b { font-size: 15px; }
+.kb-entry p { margin: 6px 0 0; font-size: 13px; }
+.kb-entry-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.kb-entry-actions button { padding: 5px 10px; font-size: 12px; border-radius: 7px; background: #e9f0e4; border-color: transparent; }
+.kb-entry-actions button:hover { background: #7b9e29; color: #fff; }
+
+@media (max-width: 900px) {
+  .knowledge-web { grid-template-columns: minmax(0, 1fr); }
+}

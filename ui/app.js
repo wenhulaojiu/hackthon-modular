@@ -3,7 +3,7 @@ const configs = [
     name: "老板小程序",
     mobile: true,
     boss: true,
-    nav: ["首页", "门店信息", "知识库", "我的"],
+    nav: ["首页", "门店信息", "客户信息", "知识库", "我的"],
   },
   {
     name: "员工小程序",
@@ -15,7 +15,7 @@ const configs = [
     name: "老板网页",
     mobile: false,
     boss: true,
-    nav: ["总览", "门店信息", "客户信息", "微信数据", "商品", "AI 与设置"],
+    nav: ["总览", "门店信息", "客户信息", "微信数据", "商品", "知识库", "自动回复", "AI 与设置"],
   },
   {
     name: "员工网页",
@@ -27,6 +27,7 @@ const configs = [
       "微信数据",
       "自动回复",
       "服务与商品",
+      "知识库",
       "AI 与设置",
     ],
   },
@@ -158,6 +159,11 @@ function employeeCustomersVisible() {
 function customerHeading() {
   return `<div class="top employee-customer-heading"><div><div class="muted">${esc(employeeStore().name)} / 小陈</div><h1>${page}</h1></div><label class="customer-search"><input aria-label="搜索顾客" placeholder="搜索顾客" value="${esc(customerQuery)}" oninput="customerQuery=this.value;updateEmployeeCustomers()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></label></div>`;
 }
+function greeting(name) {
+  const h = new Date().getHours();
+  const word = h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
+  return `${word}，${name}`;
+}
 function render() {
   const c = configs[role];
   document.getElementById("roles").innerHTML = configs
@@ -167,7 +173,7 @@ function render() {
     )
     .join("");
   document.getElementById("app").innerHTML =
-    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${!c.mobile && page !== "我的" && (panelHistory.length || page !== c.nav[0]) ? '<button style="margin-bottom:16px" onclick="backPanel()">← 返回上一页</button>' : ""}${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="muted">${c.boss ? "青禾母婴 · 老板" : esc(employeeStore().name) + " / 小陈"}</div><h1>${page}</h1></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
+    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${c.mobile && panelHistory.length && page !== "知识库" ? '<button class="back-link" onclick="backPanel()">← 返回上一级</button>' : ""}${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="muted">${c.boss ? greeting("老板") : greeting("小陈")}</div><h1>${page}</h1></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
 }
 function employeeCustomerPage() {
   return `<div class="customer-list-toolbar"><label class="customer-stage-filter"><span class="muted">顾客时期</span><select aria-label="顾客时期筛选" onchange="customerStage=this.value;updateEmployeeCustomers()"><option value="">全部时期</option>${["一段", "二段", "三段", "四段"].map((v) => `<option value="${v}" ${customerStage === v ? "selected" : ""}>${v}时期</option>`).join("")}</select></label><button class="primary" onclick="edit('customers')">＋ 新建客户</button></div><p class="customer-result-count muted" id="employee-customer-count"></p><div class="employee-customer-list" id="employee-customer-list"></div>`;
@@ -192,7 +198,7 @@ function updateEmployeeCustomers() {
     ? rows
         .map(
           ({ x, i }) =>
-            `<article class="employee-customer-row"><strong class="customer-name">${esc(x.name)}</strong><span class="customer-baby">${esc(x.baby || "宝宝月龄未填写")}</span><button class="customer-detail-button" aria-label="查看${esc(x.name)}的详情" onclick="detail(${i})">详情 <span aria-hidden="true">→</span></button></article>`,
+            `<article class="employee-customer-row"><div class="customer-row-main"><strong class="customer-name">${esc(x.name)}</strong><span class="customer-baby">${esc(x.baby || "宝宝月龄未填写")}</span><p class="customer-note">${esc(x.note || "")}</p></div><button class="customer-detail-button" aria-label="查看${esc(x.name)}的详情" onclick="detail(${i})">详情 <span aria-hidden="true">→</span></button></article>`,
         )
         .join("")
     : '<div class="card customer-empty"><h2>暂无符合条件的顾客</h2><p>请调整搜索关键词或顾客时期。</p><button onclick="customerQuery=&quot;&quot;;customerStage=&quot;&quot;;render()">清空筛选</button></div>';
@@ -208,7 +214,25 @@ function employeeStore() {
 }
 function employeeStoreCard() {
   const x = employeeStore();
-  return `<section class="card employee-store-card" aria-label="门店信息"><div class="employee-store-card-header"><b>${esc(x.name)}</b><button class="store-edit-button" onclick="editEmployeeStore()">编辑门店信息</button></div><p><span>地址：${esc(x.address)}</span><span>电话：${esc(x.phone)}</span></p></section><br>`;
+  return `<div class="employee-store-line" aria-label="门店信息"><b>${esc(x.name)}</b><span class="muted">${esc(x.address)} · ${esc(x.phone)}</span></div>`;
+}
+function employeeHomeLineChart() {
+  const rows = employeeWeeklyDemo;
+  const max = Math.ceil(Math.max(...rows.map((x) => x.sales)) / 1000) * 1000;
+  const total = rows.reduce((sum, x) => sum + x.sales, 0);
+  const left = 34, right = 452, top = 22, bottom = 176;
+  const points = rows.map((x, i) => {
+    const px = left + ((right - left) / (rows.length - 1)) * i;
+    const py = bottom - (x.sales / max) * (bottom - top);
+    return { ...x, px, py };
+  });
+  const line = points.map((p, i) => `${i ? "L" : "M"}${p.px.toFixed(1)},${p.py.toFixed(1)}`).join(" ");
+  const area = `${line} L${points[points.length - 1].px},${bottom} L${points[0].px},${bottom} Z`;
+  const svg = `<svg class="home-line-chart" viewBox="0 0 480 224" role="img" aria-label="近七日销售额折线图，七日合计${total}元"><defs><linearGradient id="homeLineFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8fbb6d" stop-opacity=".28"/><stop offset="100%" stop-color="#8fbb6d" stop-opacity="0"/></linearGradient></defs>${[0, 1, 2].map((i) => {
+    const y = top + ((bottom - top) / 2) * i;
+    return `<line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#e3ebdd" stroke-dasharray="${i === 2 ? "0" : "4 5"}"/>`;
+  }).join("")}<path d="${area}" fill="url(#homeLineFill)"/><path d="${line}" fill="none" stroke="#6f9d4f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${points.map((p) => `<g><circle cx="${p.px}" cy="${p.py}" r="4" fill="#fff" stroke="#6f9d4f" stroke-width="2"><title>${p.date}：${p.sales} 元</title></circle><text x="${p.px}" y="${p.py - 10}" text-anchor="middle" fill="#557b46" font-size="12">${p.sales}</text><text x="${p.px}" y="204" text-anchor="middle" fill="#7b8974" font-size="12">${p.date}</text></g>`).join("")}</svg>`;
+  return `<section class="card employee-trend-card"><div class="trend-card-heading"><h2>本店近七日销售额</h2><span class="badge">演示</span></div><div class="trend-total">¥ ${total.toLocaleString()}<span>七日合计</span></div>${svg}</section>`;
 }
 function editEmployeeStore() {
   const x = employeeStore();
@@ -244,7 +268,7 @@ function bossSalesTrend() {
     ...x,
     sales: [2800, 4800, 3840, 6400, 5200, 7600, 8640][i],
   }));
-  return `<div class="boss-sales-trend">${employeeBarChart("sales", "销售额（元）", "元", rows)}</div><button onclick="go('门店信息')">查看门店数据 →</button>`;
+  return `<div class="boss-sales-trend">${employeeBarChart("sales", "销售额（元）", "元", rows)}</div>`;
 }
 function employeeTrendCharts() {
   return `<div class="employee-trends">${employeeBarChart("sales", "近七日销售额", "元")}${employeeBarChart("customers", "近七日客户增长量", "人")}</div>`;
@@ -299,26 +323,44 @@ function tasks() {
   return data.tasks
     .map(
       (t, i) =>
-        `<div class="row"><label><input style="width:auto;margin-right:10px" type="checkbox" ${t.done ? "checked" : ""} onchange="data.tasks[${i}].done=this.checked;save();render()">${esc(t.text)}</label></div>`,
+        `<label class="todo-row ${t.done ? "checked" : ""}"><input class="todo-check" type="checkbox" ${t.done ? "checked" : ""} onchange="data.tasks[${i}].done=this.checked;save();render()"><span class="todo-text">${esc(t.text)}</span></label>`,
     )
     .join("");
 }
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `${!c.boss ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日待办"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
+    return `${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日待办"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))
     return `<button class="primary" onclick="edit('customers')">＋ 新建客户</button><h2>按顾客时期分类</h2><div class="grid" style="margin:16px 0">${["一段", "二段", "三段", "四段"].map((v) => `<button class="card metric ${customerStage === v ? "primary" : ""}" style="text-align:left" onclick="customerStage='${v}';render()"><span style="font-size:16px;font-weight:bold">${v}时期顾客</span><strong style="display:block;font-size:28px;margin:12px 0">${data.customers.filter((x) => x.stage === v).length} 位</strong><span>查看该时期全部顾客 →</span></button>`).join("")}</div><div class="top"><h2>${customerStage ? customerStage + "时期顾客" : "全部顾客"} · ${data.customers.filter((x) => !customerStage || x.stage === customerStage).length} 位</h2>${customerStage ? `<button onclick="customerStage='';render()">查看全部顾客</button>` : ""}</div><input placeholder="搜索姓名、微信、联系方式、门店…" oninput="filter(this.value)"><div class="grid">${data.customers.map((x, i) => (customerStage && x.stage !== customerStage ? "" : `<div class="card customer searchable" onclick="detail(${i})"><div class="row" style="padding-top:0"><div class="avatar">${esc(x.name.slice(-2))}</div><b>${esc(x.name)}</b></div><p>${esc(x.baby)} · ${esc(x.stage ? x.stage + "时期" : "时期未设置")}</p><div class="muted">微信：${esc(x.wechat || "未填写")}<br>联系方式：${esc(x.phone || "未填写")}</div><p>${esc(x.note)}</p><div class="muted">${esc(x.store || "未填写门店")} · 累计消费 ¥ ${Number(x.amount || 0).toLocaleString()}</div><p class="muted">最近联系：${esc(x.lastContact || "未记录")}<br>下次联系：${esc(x.nextContact || "未安排")}</p><div class="muted">查看档案 →</div></div>`)).join("")}</div>`;
-  if (page === "知识库") return knowledgePage();
+  if (page === "知识库") return c.mobile ? knowledgePage() : knowledgeWebPage();
+  if (page === "自动回复" && !c.mobile) return autoReplyPage();
   if (["商品", "服务与商品"].includes(page))
     return `<button class="primary" onclick="edit('products')">＋ 填写商品信息</button><p class="notice">点击上方按钮新建；点击卡片的“编辑商品信息”填写价格、规格、库存等。下面已提供完整虚构样例，可直接编辑参考。</p><input placeholder="搜索商品或服务…" oninput="filter(this.value)">${cards("products")}`;
   if (page === "微信数据")
     return `<div class="card"><h2>微信数据${c.boss ? "导出" : "导入"}</h2><p>${c.boss ? "按门店与日期选择，导出客户经营数据。" : "选择聊天文件，整理到客户档案。"}</p><input type="date" value="2026-11-13">${c.boss ? '<button class="primary" onclick="download()">导出示例 CSV</button>' : '<input type="file" onchange="toast(&quot;已选择文件，原型不读取或上传文件内容&quot;)">'}<p class="notice">演示入口，不连接真实微信。</p></div>`;
   if (page === "自动回复")
     return `<div class="card"><h2>自动回复设置</h2><label><input style="width:auto" type="checkbox" ${data.auto ? "checked" : ""} onchange="data.auto=this.checked;save();toast('设置已保存到原型')"> 启用自动回复（演示）</label><p>遇到超出知识库的问题，转交销售人工处理。</p><textarea id="reply" placeholder="输入欢迎语">${esc(data.reply || "你好，欢迎来到青禾母婴，请问有什么可以帮你？")}</textarea><button class="primary" onclick="data.reply=document.getElementById('reply').value;save();toast('欢迎语已保存')">保存</button></div>`;
-  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div><h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
+  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div>${!c.boss ? `<h2>我的门店</h2><p class="muted">${esc(employeeStore().name)}<br>${esc(employeeStore().address)} · ${esc(employeeStore().phone)}</p><button class="primary" onclick="editEmployeeStore()">编辑门店信息</button>` : ""}<h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
+}
+function knowledgeWebPage() {
+  const left = ["产品", "服务", "专业", "其他"]
+    .map((c) => {
+      const rows = data.knowledge.filter((x) => x.category === c);
+      return `<h3 class="kb-group-title">${c}</h3>` + (rows.length
+        ? rows.map((x) => {
+            const i = data.knowledge.indexOf(x);
+            return `<article class="kb-entry"><div class="kb-entry-head"><b>${esc(x.name)}</b><span class="kb-entry-actions"><button onclick="edit('knowledge',${i})">编辑</button><button onclick="if(confirm('删除这条知识？')){data.knowledge.splice(${i},1);save();render()}">移除</button></span></div><p class="muted">${esc(x.note)}</p></article>`;
+          }).join("")
+        : '<p class="muted">暂无内容</p>');
+    })
+    .join("");
+  return `<div class="knowledge-web"><section class="card kb-column"><div class="kb-column-head"><h2>门店知识</h2><button class="primary" onclick="edit('knowledge')">＋ 添加知识</button></div><p class="muted">产品、服务、专业与其他资料，供自动回复引用。</p><input aria-label="搜索知识" placeholder="搜索知识…" oninput="this.closest('.kb-column').querySelectorAll('.kb-entry').forEach(e=>e.style.display=e.textContent.includes(this.value)?'':'none')">${left}</section><section class="card kb-column"><div class="kb-column-head"><h2>客户信息</h2><button class="primary" onclick="go('客户信息')">管理客户</button></div><p class="muted">每位客户的偏好与宝宝情况，AI 个性化回复的依据。</p><input aria-label="搜索客户" placeholder="搜索客户…" oninput="this.closest('.kb-column').querySelectorAll('.kb-entry').forEach(e=>e.style.display=e.textContent.includes(this.value)?'':'none')">${data.customers.map((x, i) => `<article class="kb-entry"><div class="kb-entry-head"><b>${esc(x.name)}</b><span class="kb-entry-actions"><button onclick="detail(${i})">详情</button><button onclick="edit('customers',${i})">编辑</button></span></div><p class="muted">${esc(x.baby || "宝宝月龄未填写")} · ${esc(x.stage ? x.stage + "时期" : "")}</p><p class="muted">${esc(x.note || "")}</p></article>`).join("")}</section></div>`;
+}
+function autoReplyPage() {
+  return `<div class="card"><h2>自动回复设置</h2><label class="todo-row ${data.auto ? "checked" : ""}"><input class="todo-check" type="checkbox" ${data.auto ? "checked" : ""} onchange="data.auto=this.checked;save();render()"><span class="todo-text">启用自动回复（演示）</span></label><p class="muted">知识库有标准答案的常见问题自动发送；拿不准的，由导购确认后再发；医疗类问题不回答，引导就医。</p><h2>欢迎语</h2><textarea id="reply" placeholder="输入欢迎语">${esc(data.reply || "你好，欢迎来到青禾母婴，请问有什么可以帮你？")}</textarea><div class="actions"><button class="primary" onclick="data.reply=document.getElementById('reply').value;save();toast('欢迎语已保存')">保存欢迎语</button></div><h2>回复规则</h2><div class="row"><span>常见问题（知识库命中）</span><b>自动发送</b></div><div class="row"><span>不确定 / 敏感问题</span><b>导购确认后发送</b></div><div class="row"><span>医疗、用药类</span><b>不回答，建议咨询医生</b></div><p class="notice">演示设置，未连接真实微信与模型。</p></div>`;
 }
 function cards(key) {
   if (key === "products") return productCards();
@@ -536,7 +578,7 @@ function storePage() {
     )
     .join(
       "",
-    )}</select></label><label>排序方向<select onchange="setStoreFilter('direction',this.value)"><option value="desc" ${sf.direction === "desc" ? "selected" : ""}>从高到低</option><option value="asc" ${sf.direction === "asc" ? "selected" : ""}>从低到高</option></select></label></div><button onclick="sf={province:'',city:'',district:'',sort:'customers',direction:'desc',query:''};render()">重置筛选</button><p class="muted">所在地仅列出示例门店覆盖的地区，地址、负责人、号码均为虚构演示。</p></div><p id="store-count"></p><div id="store-list" class="grid"></div>`;
+    )}</select></label><label>排序方向<select onchange="setStoreFilter('direction',this.value)"><option value="desc" ${sf.direction === "desc" ? "selected" : ""}>从高到低</option><option value="asc" ${sf.direction === "asc" ? "selected" : ""}>从低到高</option></select></label></div><button onclick="sf={province:'',city:'',district:'',sort:'customers',direction:'desc',query:''};render()">重置筛选</button></div><p id="store-count"></p><div id="store-list" class="grid"></div>`;
 }
 function setStoreFilter(k, v) {
   sf[k] = v;
@@ -569,7 +611,7 @@ function updateStores() {
     ? rows
         .map(
           (x) =>
-            `<div class="card"><h2>青禾母婴 · ${x.name}</h2><div class="muted">${x.province} · ${x.city} · ${x.district}</div><p>顾客 ${x.customers} 人 ｜ 员工 ${x.employees} 人</p><span class="badge">今日销售 ¥ ${x.today.toLocaleString()}</span><br><br><button onclick="store('${x.name}')">查看详情 →</button></div>`,
+            `<div class="card store-card"><h2>青禾母婴 · ${x.name}</h2><div class="muted">${x.province} · ${x.city} · ${x.district}</div><p>顾客 ${x.customers} 人 ｜ 员工 ${x.employees} 人</p><span class="badge">今日销售 ¥ ${x.today.toLocaleString()}</span><br><br><button class="store-detail-button" onclick="store('${x.name}')">查看详情 →</button></div>`,
         )
         .join("")
     : '<div class="card wide"><h2>暂无符合条件的门店</h2><p>请调整所在地或搜索关键词。</p></div>';
@@ -590,12 +632,14 @@ function store(name) {
       )
       .join(
         "",
-      )}</div><p class="muted">当周按周一至今统计，当月按本月1日至今统计。</p><div class="actions"><button onclick="closeModal()">关闭</button><button class="primary" onclick="closeModal();go('客户信息')">查看顾客</button></div>`,
+      )}</div><p class="muted">当周按周一至今统计，当月按本月1日至今统计。</p><div class="actions"><button onclick="closeModal()">关闭</button></div>`,
   );
 }
+let campaignStores = [];
 function campaign() {
+  campaignStores = [];
   modal(
-    `<h2>创建活动</h2><input id="campaign" placeholder="活动名称，如周末母婴体验日"><textarea placeholder="活动介绍与服务内容"></textarea><h2>选择目标客户</h2>${data.customers.map((x) => `<div><label><input type="checkbox" style="width:auto"> ${esc(x.name)} · ${esc(x.store || "未填写门店")}</label></div>`).join("")}<div class="notice">演示仅生成提示，不会发送微信。</div><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="closeModal();toast('已生成示例活动任务，未实际发送')">生成任务</button></div>`,
+    `<h2>创建活动</h2><input id="campaign" placeholder="活动名称，如周末母婴体验日"><textarea placeholder="活动介绍与服务内容"></textarea><h2>选择目标门店</h2><div class="campaign-store-list">${stores.map((x, i) => `<label class="campaign-store"><span class="campaign-store-name">青禾母婴 · ${esc(x.name)}</span><input class="campaign-check" type="checkbox" aria-label="选择${esc(x.name)}" onchange="this.closest('.campaign-store').classList.toggle('checked',this.checked)"></label>`).join("")}</div><div class="notice">演示仅生成提示，不会发送微信。</div><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="closeModal();toast('已生成示例活动任务，未实际发送')">生成任务</button></div>`,
   );
 }
 function download() {
@@ -768,7 +812,7 @@ function knowledgeCategoryField(x) {
   return `<label style="display:block;margin:14px 0">知识分类<select id="knowledge-category" aria-label="知识分类">${knowledgeCategories.map((c) => `<option value="${c}" ${chosen === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>`;
 }
 function knowledgePage() {
-  return `<div class="tabs"><button class="primary" onclick="edit('knowledge')">＋ 添加知识</button><button onclick="go('顾客信息')">查看用户信息</button></div><h2>知识分类</h2><div class="grid knowledge-categories">${knowledgeCategories.map((c) => `<button class="card metric knowledge-category ${knowledgeCategory === c ? "active" : ""}" aria-label="查看${c}知识" aria-pressed="${knowledgeCategory === c}" onclick="knowledgeCategory='${c}';render()"><span class="knowledge-category-name">${c}</span><strong>${data.knowledge.filter((x) => x.category === c).length} 条知识</strong></button>`).join("")}</div><div class="knowledge-results-heading"><h2>${knowledgeCategory ? knowledgeCategory + "知识" : "全部知识"}</h2>${knowledgeCategory ? `<button onclick="knowledgeCategory='';render()">查看全部</button>` : ""}</div><input aria-label="搜索知识" placeholder="搜索知识标题或内容…" value="${esc(knowledgeQuery)}" oninput="knowledgeQuery=this.value;updateKnowledge()"><p class="muted" id="knowledge-count"></p><div id="knowledge-list" class="grid"></div>`;
+  return `<div class="tabs"><button class="primary" onclick="edit('knowledge')">＋ 添加知识</button><button onclick="go('客户信息')">查看客户信息</button></div><h2>知识分类</h2><div class="grid knowledge-categories">${knowledgeCategories.map((c) => `<button class="card metric knowledge-category ${knowledgeCategory === c ? "active" : ""}" aria-label="查看${c}知识" aria-pressed="${knowledgeCategory === c}" onclick="knowledgeCategory='${c}';render()"><span class="knowledge-category-name">${c}</span><strong>${data.knowledge.filter((x) => x.category === c).length} 条知识</strong></button>`).join("")}</div><div class="knowledge-results-heading"><h2>${knowledgeCategory ? knowledgeCategory + "知识" : "全部知识"}</h2>${knowledgeCategory ? `<button onclick="knowledgeCategory='';render()">查看全部</button>` : ""}</div><input aria-label="搜索知识" placeholder="搜索知识标题或内容…" value="${esc(knowledgeQuery)}" oninput="knowledgeQuery=this.value;updateKnowledge()"><p class="muted" id="knowledge-count"></p><div id="knowledge-list" class="grid"></div>`;
 }
 function updateKnowledge() {
   const target = document.getElementById("knowledge-list");
