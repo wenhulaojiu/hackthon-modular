@@ -1,17 +1,17 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Pencil, Search, Trash2 } from 'lucide-react';
 import type { AppState, Customer } from '../../lib/types';
 import { babyProfileLabel } from '../../lib/baby-milestones';
 import { today } from '../../lib/domain';
+import './knowledge.css';
 
 type Props = {
   state: AppState;
   onChange: (next: AppState) => Promise<boolean>;
   notify: (text: string, error?: boolean) => void;
 };
-
-type Draft = { preferences: string; budget: string };
 
 /** 汇总客户已确认消费中出现最多的商品，作为「常买」参考。 */
 function frequentBuys(state: AppState, customerId: string): string {
@@ -31,8 +31,9 @@ function frequentBuys(state: AppState, customerId: string): string {
 /** 用户信息分区：每个客户喜欢什么、常买什么、宝宝情况，一处查、直接改，AI 回复即按此个性化。 */
 export default function CustomerKnowledgePanel({ state, onChange, notify }: Props) {
   const [query, setQuery] = useState('');
-  const [edits, setEdits] = useState<Record<string, Draft>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ preferences: '', budget: '' });
+  const [saving, setSaving] = useState(false);
   const todayDate = today();
 
   const customers = useMemo(() => {
@@ -47,18 +48,14 @@ export default function CustomerKnowledgePanel({ state, onChange, notify }: Prop
     );
   }, [state.customers, query]);
 
-  const draftOf = (customer: Customer): Draft => edits[customer.id] ?? { preferences: customer.preferences, budget: customer.budget };
-  const setDraft = (customer: Customer, patch: Partial<Draft>) =>
-    setEdits(current => ({ ...current, [customer.id]: { ...draftOf(customer), ...patch } }));
-  const isDirty = (customer: Customer) => {
-    const draft = draftOf(customer);
-    return draft.preferences !== customer.preferences || draft.budget !== customer.budget;
+  const startEdit = (customer: Customer) => {
+    setEditingId(customer.id);
+    setDraft({ preferences: customer.preferences, budget: customer.budget });
   };
 
   const save = async (customer: Customer) => {
-    if (savingId) return;
-    const draft = draftOf(customer);
-    setSavingId(customer.id);
+    if (saving) return;
+    setSaving(true);
     try {
       const next: AppState = {
         ...state,
@@ -67,82 +64,105 @@ export default function CustomerKnowledgePanel({ state, onChange, notify }: Prop
         ),
       };
       if (await onChange(next)) {
-        setEdits(current => {
-          const rest = { ...current };
-          delete rest[customer.id];
-          return rest;
-        });
+        setEditingId(null);
         notify(`已更新 ${customer.name} 的偏好记录`);
       }
     } finally {
-      setSavingId(null);
+      setSaving(false);
+    }
+  };
+
+  const clear = async (customer: Customer) => {
+    if (saving) return;
+    if (!window.confirm(`确定清空 ${customer.name} 的偏好和预算记录吗？客户档案本身会保留。`)) return;
+    setSaving(true);
+    try {
+      const next: AppState = {
+        ...state,
+        customers: state.customers.map(item =>
+          item.id === customer.id ? { ...item, preferences: '', budget: '' } : item,
+        ),
+      };
+      if (await onChange(next)) {
+        if (editingId === customer.id) setEditingId(null);
+        notify(`已清空 ${customer.name} 的偏好记录`);
+      }
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div className="card-heading">
+    <div className="knowledge-panel">
+      <div className="knowledge-panel-head">
         <div>
           <h2>用户信息</h2>
           <p>每个客户的偏好、常买商品和宝宝情况。AI 个性化回复以此为准，修改后立即生效。</p>
         </div>
-        <input
-          className="input"
-          style={{ maxWidth: 260 }}
-          type="search"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="搜索姓名、标签、偏好…"
-          aria-label="搜索用户信息"
-        />
+        <span className="knowledge-count">{customers.length} / {state.customers.length} 位</span>
       </div>
-      {!customers.length && <p className="muted" style={{ padding: '12px 0' }}>没有匹配的客户。</p>}
+
+      <div className="knowledge-search">
+        <Search size={15} />
+        <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索姓名、标签、偏好…" aria-label="搜索用户信息" />
+      </div>
+
+      {!customers.length && <p className="knowledge-empty">没有匹配的客户。</p>}
       {customers.map(customer => {
-        const draft = draftOf(customer);
+        const editing = editingId === customer.id;
         const buys = frequentBuys(state, customer.id);
-        return (
-          <section key={customer.id} style={{ padding: '14px 0', borderTop: '1px solid #f1f3f6' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-              <strong>{customer.name}</strong>
-              <span className="muted small">{customer.stage}</span>
-              <span className="muted small">{babyProfileLabel(customer.baby, todayDate)}</span>
-              {[...customer.manualTags, ...customer.tags].slice(0, 5).map(tag => (
-                <span key={tag} className="tag small">{tag}</span>
-              ))}
+        if (!editing) {
+          return (
+            <div key={customer.id} className="knowledge-entry">
+              <div className="knowledge-entry-head">
+                <span className="knowledge-entry-title">{customer.name}</span>
+                <span className="knowledge-actions">
+                  <button type="button" className="knowledge-btn edit" onClick={() => startEdit(customer)}><Pencil size={12} />编辑</button>
+                  <button type="button" className="knowledge-btn remove" disabled={saving} onClick={() => { void clear(customer); }}><Trash2 size={12} />移除</button>
+                </span>
+              </div>
+              <div className="knowledge-entry-meta">
+                <span>{customer.stage}</span>
+                <span>{babyProfileLabel(customer.baby, todayDate)}</span>
+                {buys && <span>常买：{buys}</span>}
+              </div>
+              {customer.preferences && <p className="knowledge-entry-preview">偏好：{customer.preferences}</p>}
+              {customer.budget && <p className="knowledge-entry-preview">预算：{customer.budget}</p>}
+              {[...customer.manualTags, ...customer.tags].length > 0 && (
+                <div className="knowledge-tags" style={{ marginTop: 6 }}>
+                  {[...customer.manualTags, ...customer.tags].slice(0, 5).map(tag => <span key={tag} className="knowledge-tag">{tag}</span>)}
+                </div>
+              )}
             </div>
-            {buys && <p className="muted small" style={{ margin: '0 0 8px' }}>常买：{buys}</p>}
+          );
+        }
+        return (
+          <div key={customer.id} className="knowledge-entry editing">
+            <div className="knowledge-entry-head" style={{ marginBottom: 8 }}>
+              <span className="knowledge-entry-title">{customer.name}</span>
+              <span className="knowledge-entry-meta">{customer.stage} · {babyProfileLabel(customer.baby, todayDate)}</span>
+            </div>
             <label className="field" style={{ display: 'block', marginBottom: 8 }}>
               偏好（喜欢什么、忌讳什么）
               <textarea
-                className="input"
-                rows={2}
-                maxLength={500}
-                value={draft.preferences}
-                onChange={event => setDraft(customer, { preferences: event.target.value })}
+                className="input" rows={2} maxLength={500} value={draft.preferences}
+                onChange={event => setDraft(current => ({ ...current, preferences: event.target.value }))}
                 placeholder="例如：偏好国产奶粉，关注乳铁蛋白，对价格敏感"
               />
             </label>
             <label className="field" style={{ display: 'block', marginBottom: 8 }}>
               预算
               <input
-                className="input"
-                maxLength={80}
-                value={draft.budget}
-                onChange={event => setDraft(customer, { budget: event.target.value })}
+                className="input" maxLength={80} value={draft.budget}
+                onChange={event => setDraft(current => ({ ...current, budget: event.target.value }))}
                 placeholder="例如：每月 800-1200 元"
               />
             </label>
-            <div style={{ textAlign: 'right' }}>
-              <button
-                className="btn primary sm"
-                type="button"
-                disabled={!isDirty(customer) || savingId !== null}
-                onClick={() => { void save(customer); }}
-              >
-                {savingId === customer.id ? '保存中…' : '保存'}
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="knowledge-btn ghost" type="button" disabled={saving} onClick={() => setEditingId(null)}>取消</button>
+              <button className="knowledge-btn save" type="button" disabled={saving} onClick={() => { void save(customer); }}>{saving ? '保存中…' : '保存'}</button>
             </div>
-          </section>
+          </div>
         );
       })}
     </div>

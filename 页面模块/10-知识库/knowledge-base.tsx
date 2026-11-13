@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { GuideKnowledge, SharedProps } from '../../lib/types';
 import { assertWorkspaceCurrent, captureWorkspace } from '../../lib/client-workspace';
 import { loadSavedReplyConfig, localRepliesAvailable, replyRequest } from '../05-自动回复/reply-ui';
 import GuideKnowledgePanel from '../06-商品与服务/guide-knowledge-panel';
 import CustomerKnowledgePanel from './customer-knowledge-panel';
+import './knowledge.css';
 
 export default function KnowledgeBase({ state, onChange, notify }: SharedProps) {
-  const [section, setSection] = useState<'store' | 'customer'>('store');
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -35,13 +35,8 @@ export default function KnowledgeBase({ state, onChange, notify }: SharedProps) 
     return true;
   };
 
-  return <>
-    <div className="range-toggle" role="tablist" style={{ marginBottom: 12 }}>
-      <button role="tab" aria-selected={section === 'store'} className={section === 'store' ? 'active' : ''} onClick={() => setSection('store')}>门店信息</button>
-      <button role="tab" aria-selected={section === 'customer'} className={section === 'customer' ? 'active' : ''} onClick={() => setSection('customer')}>用户信息</button>
-    </div>
-    {section === 'store'
-      ? <GuideKnowledgePanel state={state} notify={notify} onSave={save} standalone />
-      : <CustomerKnowledgePanel state={state} onChange={onChange} notify={notify} />}
-  </>;
+  return <div className="knowledge-columns">
+    <GuideKnowledgePanel state={state} notify={notify} onSave={save} standalone />
+    <CustomerKnowledgePanel state={state} onChange={onChange} notify={notify} />
+  </div>;
 }
