@@ -1,0 +1,1714 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>客序 · 员工小程序</title>
+  <!-- 单文件原型：样式与交互均已内嵌，可复制本文件单独打开。 -->
+  <style>
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font:
+    14px "Microsoft YaHei",
+    sans-serif;
+  background: #edf2eb;
+  color: #24392d;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid #dce5d8;
+  background: white;
+  color: inherit;
+  border-radius: 10px;
+  padding: 11px 15px;
+}
+button:hover {
+  background: #e9f0e4;
+}
+header {
+  padding: 22px 30px;
+  background: #fff;
+  border-bottom: 1px solid #dce5d8;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+header b {
+  font-size: 22px;
+}
+header small {
+  color: #83917d;
+}
+.active,
+.primary {
+  background: #547c45 !important;
+  color: white !important;
+  border-color: #547c45;
+}
+#roles {
+  display: flex;
+  gap: 8px;
+}
+.hint {
+  padding: 14px 30px;
+  color: #718168;
+  font-size: 12px;
+}
+.shell {
+  display: flex;
+  background: #fff;
+  max-width: 1320px;
+  margin: 0 auto 35px;
+  min-height: 700px;
+  border: 1px solid #dce5d8;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.shell.mobile {
+  width: 410px;
+  min-height: 780px;
+  position: relative;
+  display: block;
+  border: 7px solid #314331;
+  border-radius: 35px;
+}
+.sidebar {
+  width: 200px;
+  background: #f9fbf7;
+  padding: 26px 18px;
+  flex-shrink: 0;
+}
+.sidebar b {
+  display: block;
+  font-size: 25px;
+  margin: 0 0 28px;
+}
+.sidebar button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 9px;
+  border: 0;
+  background: transparent;
+}
+.main {
+  padding: 30px;
+  flex: 1;
+  min-width: 0;
+}
+.mobile .main {
+  padding: 22px 18px 90px;
+}
+.mobile .sidebar {
+  display: none;
+}
+h1 {
+  font-size: 26px;
+  margin: 0 0 7px;
+}
+h2 {
+  font-size: 17px;
+}
+p {
+  color: #819078;
+  line-height: 1.8;
+}
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #dce5d8;
+  border-radius: 17px;
+  padding: 20px;
+  box-shadow: 0 4px 15px #324c2706;
+}
+.metric {
+  background: #f1f6ed;
+}
+.metric b {
+  display: block;
+  font-size: 30px;
+  margin-top: 10px;
+  color: #557b46;
+}
+.wide {
+  grid-column: 1/-1;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid #ecf0e8;
+}
+.muted {
+  font-size: 12px;
+  color: #819078;
+}
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  background: #edf3e7;
+  padding: 5px 9px;
+  border-radius: 7px;
+  margin: 4px 4px 0 0;
+}
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: #e5eddc;
+  display: grid;
+  place-items: center;
+  color: #6b805c;
+  font-weight: bold;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+input,
+textarea {
+  border: 1px solid #d9e2d3;
+  border-radius: 9px;
+  padding: 12px;
+  background: #f8faf6;
+  width: 100%;
+  outline-color: #769461;
+}
+input {
+  margin: 12px 0;
+}
+textarea {
+  min-height: 110px;
+  margin: 10px 0;
+}
+.mobile .grid {
+  gap: 10px;
+}
+.mobile .card {
+  padding: 15px;
+}
+.mobile h1 {
+  font-size: 23px;
+}
+.bottom {
+  display: none;
+}
+.mobile .bottom {
+  display: flex;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-top: 1px solid #e4e9df;
+  padding: 12px 5px;
+  justify-content: space-around;
+}
+.bottom button {
+  padding: 11px 9px;
+  font-size: 12px;
+  border: 0;
+}
+.chart {
+  height: 155px;
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  padding-top: 20px;
+}
+.chart div {
+  background: #83a66c;
+  flex: 1;
+  border-radius: 8px 8px 0 0;
+  min-height: 25px;
+}
+.chart div:hover {
+  background: #547c45;
+}
+.customer {
+  cursor: pointer;
+  background: #fbfcf9;
+}
+.customer:hover {
+  border-color: #83a66c;
+}
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+dialog {
+  border: 1px solid #dbe3d5;
+  border-radius: 20px;
+  padding: 26px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 20px 100px #17251744;
+}
+dialog::backdrop {
+  background: #17251766;
+}
+.toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 15px 25px;
+  background: #29452a;
+  color: white;
+  border-radius: 12px;
+  z-index: 10;
+}
+.notice {
+  padding: 12px;
+  background: #f2f6ec;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #728262;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+@media (max-width: 700px) {
+  header {
+    padding: 15px;
+  }
+  #roles {
+    flex-wrap: wrap;
+  }
+  .shell {
+    margin: 0 10px;
+  }
+  .shell.mobile {
+    max-width: calc(100% - 20px);
+  }
+  .sidebar {
+    width: 125px;
+    padding: 15px 8px;
+  }
+  .main {
+    padding: 18px;
+  }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hint {
+    padding: 12px;
+  }
+  .wide {
+    grid-column: auto;
+  }
+}
+select {
+  display: block;
+  width: 100%;
+  padding: 11px 8px;
+  border: 1px solid #d9e2d3;
+  border-radius: 9px;
+  background: #f8faf6;
+  color: #24392d;
+  font: inherit;
+  margin-top: 7px;
+}
+select:disabled {
+  opacity: 0.5;
+}
+.geo {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+.geo label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+dialog {
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.mobile .geo {
+  flex-wrap: wrap;
+}
+.mobile .geo label {
+  min-width: 85px;
+}
+.mobile .grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.mobile .grid > .card,
+.mobile .grid > button.card {
+  min-width: 0;
+  padding: 12px;
+}
+.mobile .grid h2 {
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.mobile .grid p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.mobile .grid .muted {
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.mobile .grid .row {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.mobile .grid .tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mobile .grid .tabs button,
+.mobile .grid > .card > button {
+  padding: 8px;
+  font-size: 11px;
+  max-width: 100%;
+}
+.mobile .grid .metric b,
+.mobile .grid > .metric b {
+  font-size: 24px;
+}
+.mobile .grid .customer .avatar {
+  width: 38px;
+  height: 38px;
+  font-size: 15px;
+}
+.mobile .grid .customer .row {
+  align-items: center;
+}
+.mobile .grid > button.card strong {
+  font-size: 25px !important;
+}
+.mobile .grid > button.card > span {
+  font-size: 12px !important;
+}
+.mobile .grid > button.card > span:first-child {
+  font-size: 15px !important;
+}
+.mobile .grid .badge {
+  font-size: 10px;
+}
+dialog .grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 700px) {
+  .shell:not(.mobile) .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .shell:not(.mobile) .card {
+    padding: 12px;
+  }
+  .shell:not(.mobile) .grid h2 {
+    font-size: 15px;
+  }
+  .shell:not(.mobile) .grid .row {
+    flex-wrap: wrap;
+  }
+}
+/* 本次调整：加大字号、底栏线性图标、员工顾客页按手绘稿使用横向条目。 */
+body {
+  font-size: 16px;
+  line-height: 1.6;
+}
+header b {
+  font-size: 24px;
+}
+header small {
+  font-size: 14px;
+}
+.hint,
+.muted,
+.notice {
+  font-size: 14px;
+}
+.badge {
+  font-size: 13px;
+}
+.geo label {
+  font-size: 14px;
+}
+h1 {
+  font-size: 30px;
+}
+h2 {
+  font-size: 20px;
+}
+.mobile h1 {
+  font-size: 27px;
+}
+.mobile .main {
+  padding-bottom: 112px;
+}
+.mobile .grid h2 {
+  font-size: 17px;
+}
+.mobile .grid p {
+  font-size: 14px;
+}
+.mobile .grid .muted {
+  font-size: 13px;
+}
+.mobile .grid .tabs button,
+.mobile .grid > .card > button {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.mobile .grid .badge {
+  font-size: 12px;
+}
+.mobile .grid .metric b,
+.mobile .grid > .metric b {
+  font-size: 28px;
+}
+.mobile .grid > button.card strong {
+  font-size: 28px !important;
+}
+.mobile .grid > button.card > span {
+  font-size: 14px !important;
+}
+.mobile .grid > button.card > span:first-child {
+  font-size: 17px !important;
+}
+.mobile .geo label {
+  font-size: 14px;
+}
+dialog h2 {
+  font-size: 21px;
+}
+dialog .row {
+  align-items: start;
+}
+dialog .row > span:last-child {
+  overflow-wrap: anywhere;
+  text-align: right;
+  max-width: 65%;
+}
+.nav-icon {
+  width: 23px;
+  height: 23px;
+  display: block;
+  flex-shrink: 0;
+}
+.mobile .bottom {
+  gap: 2px;
+  padding: 10px 5px 12px;
+  align-items: stretch;
+}
+.mobile .bottom button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 1px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.mobile .bottom button span {
+  white-space: nowrap;
+  letter-spacing: -0.3px;
+}
+.employee-customer-heading {
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 26px;
+}
+.employee-customer-heading > .customer-search {
+  flex: 0 1 146px;
+  min-width: 105px;
+  margin-top: 16px;
+}
+.employee-customer-heading > div {
+  flex-shrink: 0;
+}
+.employee-customer-heading .muted {
+  font-size: 12px;
+}
+.customer-search {
+  position: relative;
+  display: block;
+}
+.customer-search input {
+  margin: 0;
+  padding: 11px 34px 11px 12px;
+  font-size: 15px;
+  background: #f4f7f0;
+}
+.customer-search svg {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+.customer-list-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.customer-stage-filter {
+  flex: 1;
+  max-width: 175px;
+}
+.customer-stage-filter select {
+  margin-top: 5px;
+}
+.customer-list-toolbar > button {
+  white-space: nowrap;
+  padding: 11px 12px;
+  font-size: 15px;
+}
+.customer-result-count {
+  margin: 16px 0 12px;
+}
+.employee-customer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.employee-customer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 94px;
+  padding: 19px 14px;
+  border: 1px solid #dce5d8;
+  border-radius: 19px;
+  background: #fbfcf9;
+  box-shadow: 0 3px 10px #34452b05;
+}
+.customer-name {
+  font-size: 19px;
+  white-space: nowrap;
+}
+.customer-baby {
+  font-size: 15px;
+  color: #7b8974;
+  flex: 1;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.customer-detail-button {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: 9px;
+}
+.customer-empty p {
+  font-size: 15px;
+}
+@media (max-width: 700px) {
+  .shell:not(.mobile) .grid h2 {
+    font-size: 18px;
+  }
+}
+@media (max-width: 380px) {
+  .employee-customer-heading {
+    gap: 8px;
+  }
+  .mobile .main {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+  .customer-name {
+    font-size: 18px;
+  }
+  .employee-customer-row {
+    padding: 17px 10px;
+    gap: 8px;
+  }
+  .customer-detail-button {
+    padding: 7px;
+    font-size: 14px;
+  }
+  .customer-baby {
+    font-size: 14px;
+  }
+}
+.modal-closebar {
+  position: sticky;
+  top: -26px;
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  background: #fff;
+  margin: -14px -12px 2px;
+  padding: 8px 0 4px;
+}
+.modal-close-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  border: 1px solid #dce5d8;
+  border-radius: 50%;
+  background: #f5f8f1;
+  color: #3c5535;
+}
+.modal-close-button svg {
+  width: 22px;
+  height: 22px;
+}
+.modal-close-button:hover {
+  background: #e6eedf;
+}
+.modal-close-button:focus-visible {
+  outline: 2px solid #547c45;
+  outline-offset: 2px;
+}
+.knowledge-categories {
+  margin: 16px 0 22px;
+}
+.knowledge-category {
+  text-align: left;
+  min-height: 106px;
+}
+.knowledge-category-name {
+  display: block;
+  font-size: 21px;
+  font-weight: 700;
+}
+.knowledge-category strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 400;
+  margin-top: 8px;
+}
+.knowledge-results-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.knowledge-results-heading h2 {
+  margin: 0;
+}
+.mobile .grid > button.knowledge-category {
+  padding: 17px;
+}
+.mobile .grid > button.knowledge-category > span {
+  font-size: 21px !important;
+}
+.mobile .grid > button.knowledge-category strong {
+  font-size: 16px !important;
+  margin-top: 8px;
+}
+.employee-store-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.employee-store-card-header b {
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+.store-edit-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 14px;
+  padding: 8px 12px;
+}
+.employee-store-card p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 25px;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+.store-field {
+  display: block;
+  margin-top: 16px;
+}
+.employee-trends {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+.employee-trend-card {
+  min-width: 0;
+  padding: 20px;
+}
+.trend-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.trend-card-heading h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.trend-total {
+  font-size: 31px;
+  color: #547c45;
+  font-weight: bold;
+  margin: 15px 0 5px;
+}
+.trend-total span {
+  display: block;
+  font-size: 14px;
+  font-weight: normal;
+  color: #7b8974;
+  margin-top: 4px;
+}
+.weekly-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.weekly-bar {
+  fill: #789c63;
+  transition: fill 0.15s;
+}
+.weekly-bar.customer-growth-bar {
+  fill: #b0c49e;
+}
+.weekly-bar:hover,
+.weekly-bar:focus {
+  fill: #426c35;
+  outline: none;
+}
+.trend-data {
+  font-size: 14px;
+  color: #728262;
+}
+.trend-data summary {
+  cursor: pointer;
+  padding: 9px 0;
+}
+.trend-data table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.trend-data th,
+.trend-data td {
+  border-bottom: 1px solid #e7ede2;
+  padding: 9px 0;
+}
+.trend-data td:last-child,
+.trend-data th:last-child {
+  text-align: right;
+}
+.mobile .employee-store-card-header {
+  gap: 9px;
+}
+.mobile .employee-store-card-header b {
+  font-size: 18px;
+}
+.mobile .store-edit-button {
+  font-size: 13px;
+  padding: 8px;
+}
+.mobile .employee-store-card p {
+  display: block;
+}
+.mobile .employee-store-card p span {
+  display: block;
+  font-size: 14px;
+  line-height: 1.8;
+}
+@media (max-width: 850px) {
+  .employee-trends {
+    grid-template-columns: 1fr;
+  }
+  .employee-trend-card {
+    padding: 18px;
+  }
+}
+.boss-sales-trend > .employee-trend-card {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin-bottom: 16px;
+}
+.boss-sales-trend .weekly-chart {
+  max-height: 340px;
+}
+.boss-sales-trend .trend-total {
+  font-size: 32px;
+}
+.boss-sales-trend .trend-card-heading h2 {
+  font-size: 16px;
+  font-weight: normal;
+  color: #7b8974;
+}
+
+#roles { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>客序 KEXU</b>
+    <div id="roles" aria-hidden="true"></div>
+    <small>员工小程序 · 独立页面 · 示例数据</small>
+  </header>
+  <div class="hint">支持页面导航、搜索、查看详情与编辑示例内容。修改保存在当前浏览器，可重置。</div>
+  <div id="app"></div>
+  <dialog id="modal"></dialog>
+  <script>
+const configs = [
+  {
+    name: "老板小程序",
+    mobile: true,
+    boss: true,
+    nav: ["首页", "门店信息", "知识库", "我的"],
+  },
+  {
+    name: "员工小程序",
+    mobile: true,
+    boss: false,
+    nav: ["首页", "顾客信息", "服务与商品", "我的"],
+  },
+  {
+    name: "老板网页",
+    mobile: false,
+    boss: true,
+    nav: ["总览", "门店信息", "客户信息", "微信数据", "商品", "AI 与设置"],
+  },
+  {
+    name: "员工网页",
+    mobile: false,
+    boss: false,
+    nav: [
+      "总览",
+      "客户信息",
+      "微信数据",
+      "自动回复",
+      "服务与商品",
+      "AI 与设置",
+    ],
+  },
+];
+let role = 0,
+  page = "首页";
+const base = {
+  customers: [
+    {
+      name: "林知夏",
+      baby: "宝宝 2 个月",
+      tag: "重点维护",
+      note: "购买前关注奶粉段位与冲调说明。",
+    },
+    {
+      name: "周一诺",
+      baby: "宝宝 6 个月",
+      tag: "活跃客户",
+      note: "关注营养品配料，希望查看包装标签。",
+    },
+    {
+      name: "陈予安",
+      baby: "宝宝 6 个月",
+      tag: "回访中",
+      note: "偏好小尺码纸尿裤，希望确认现货。",
+    },
+    {
+      name: "许嘉禾",
+      baby: "宝宝 7 个月",
+      tag: "新客户",
+      note: "希望了解换段时间与喂养知识。",
+    },
+  ],
+  tasks: [
+    { text: "回访林知夏：确认宝宝喂养情况", done: false },
+    { text: "回复周一诺：发送商品配料说明", done: false },
+    { text: "联系陈予安：确认纸尿裤库存", done: true },
+  ],
+  knowledge: [
+    { name: "DHA 与鱼油的区别", note: "商品知识、适用范围与常见问答。" },
+    { name: "门店退换货政策", note: "请保留购物凭证，按门店政策处理。" },
+  ],
+  products: [
+    { name: "宝宝喂养咨询", note: "预约制 · 30 分钟" },
+    { name: "婴儿配方奶粉", note: "商品 · ¥ 298" },
+    { name: "产后护理服务", note: "预约制 · ¥ 198" },
+    { name: "婴儿纸尿裤", note: "商品 · ¥ 89" },
+  ],
+};
+let data;
+try {
+  data =
+    JSON.parse(localStorage.getItem("kexu-prototype")) || structuredClone(base);
+} catch {
+  data = structuredClone(base);
+}
+const esc = (s) =>
+  String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+function save() {
+  localStorage.setItem("kexu-prototype", JSON.stringify(data));
+}
+function toast(s) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = s;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 2200);
+}
+let customerQuery = "";
+let customerStage = "";
+let panelHistory = [];
+function selectRole(i) {
+  panelHistory = [];
+  role = i;
+  page = configs[i].nav[0];
+  render();
+}
+function go(p) {
+  if (p !== page) panelHistory.push(page);
+  page = p;
+  render();
+}
+function backPanel() {
+  page = panelHistory.pop() || configs[role].nav[0];
+  render();
+}
+function navIcon(label) {
+  const paths = {
+    home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
+    customers:
+      '<circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 21v-2a6 6 0 0 0-4-5.65"/>',
+    store:
+      '<path d="M3 10h18l-2-7H5l-2 7ZM4 10v11h16V10M9 21v-7h6v7M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/>',
+    book: '<path d="M12 5v16M12 5C9 3 5 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-3-1-7-1-10 1Z"/>',
+    bag: '<rect x="4" y="7" width="16" height="14" rx="2"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
+    user: '<circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+  };
+  const key =
+    label === "首页" || label === "总览"
+      ? "home"
+      : label.includes("顾客") || label.includes("客户")
+        ? "customers"
+        : label.includes("门店")
+          ? "store"
+          : label === "知识库"
+            ? "book"
+            : label.includes("商品")
+              ? "bag"
+              : "user";
+  return `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[key]}</svg>`;
+}
+function nav(bottom = false) {
+  return configs[role].nav
+    .map(
+      (p) =>
+        `<button class="${p === page ? "active" : ""}" ${p === page ? 'aria-current="page"' : ""} onclick="go('${p}')">${bottom ? navIcon(p) : ""}<span>${p}</span></button>`,
+    )
+    .join("");
+}
+function employeeCustomersVisible() {
+  return role === 1 && ["顾客信息", "客户信息"].includes(page);
+}
+function customerHeading() {
+  return `<div class="top employee-customer-heading"><div><div class="muted">${esc(employeeStore().name)} / 小陈</div><h1>${page}</h1></div><label class="customer-search"><input aria-label="搜索顾客" placeholder="搜索顾客" value="${esc(customerQuery)}" oninput="customerQuery=this.value;updateEmployeeCustomers()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></label></div>`;
+}
+function render() {
+  const c = configs[role];
+  document.getElementById("roles").innerHTML = configs
+    .map(
+      (x, i) =>
+        `<button class="${role === i ? "active" : ""}" onclick="selectRole(${i})">${x.name}</button>`,
+    )
+    .join("");
+  document.getElementById("app").innerHTML =
+    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${!c.mobile && page !== "我的" && (panelHistory.length || page !== c.nav[0]) ? '<button style="margin-bottom:16px" onclick="backPanel()">← 返回上一页</button>' : ""}${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="muted">${c.boss ? "青禾母婴 · 老板" : esc(employeeStore().name) + " / 小陈"}</div><h1>${page}</h1></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
+}
+function employeeCustomerPage() {
+  return `<div class="customer-list-toolbar"><label class="customer-stage-filter"><span class="muted">顾客时期</span><select aria-label="顾客时期筛选" onchange="customerStage=this.value;updateEmployeeCustomers()"><option value="">全部时期</option>${["一段", "二段", "三段", "四段"].map((v) => `<option value="${v}" ${customerStage === v ? "selected" : ""}>${v}时期</option>`).join("")}</select></label><button class="primary" onclick="edit('customers')">＋ 新建客户</button></div><p class="customer-result-count muted" id="employee-customer-count"></p><div class="employee-customer-list" id="employee-customer-list"></div>`;
+}
+function updateEmployeeCustomers() {
+  const target = document.getElementById("employee-customer-list");
+  if (!target) return;
+  const query = customerQuery.trim().toLocaleLowerCase();
+  const rows = data.customers
+    .map((x, i) => ({ x, i }))
+    .filter(
+      ({ x }) =>
+        (!customerStage || x.stage === customerStage) &&
+        [x.name, x.wechat, x.phone, x.store, x.baby]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query),
+    );
+  document.getElementById("employee-customer-count").textContent =
+    `共 ${rows.length} 位顾客`;
+  target.innerHTML = rows.length
+    ? rows
+        .map(
+          ({ x, i }) =>
+            `<article class="employee-customer-row"><strong class="customer-name">${esc(x.name)}</strong><span class="customer-baby">${esc(x.baby || "宝宝月龄未填写")}</span><button class="customer-detail-button" aria-label="查看${esc(x.name)}的详情" onclick="detail(${i})">详情 <span aria-hidden="true">→</span></button></article>`,
+        )
+        .join("")
+    : '<div class="card customer-empty"><h2>暂无符合条件的顾客</h2><p>请调整搜索关键词或顾客时期。</p><button onclick="customerQuery=&quot;&quot;;customerStage=&quot;&quot;;render()">清空筛选</button></div>';
+}
+function employeeStore() {
+  return (
+    data.employeeStore || {
+      name: "青禾母婴 · 城南店",
+      address: "青禾路 128 号",
+      phone: "020-8888 6666",
+    }
+  );
+}
+function employeeStoreCard() {
+  const x = employeeStore();
+  return `<section class="card employee-store-card" aria-label="门店信息"><div class="employee-store-card-header"><b>${esc(x.name)}</b><button class="store-edit-button" onclick="editEmployeeStore()">编辑门店信息</button></div><p><span>地址：${esc(x.address)}</span><span>电话：${esc(x.phone)}</span></p></section><br>`;
+}
+function editEmployeeStore() {
+  const x = employeeStore();
+  modal(
+    `<h2>编辑门店信息</h2><form onsubmit="event.preventDefault();saveEmployeeStore()"><label class="store-field">门店名称<input id="employee-store-name" value="${esc(x.name)}" required maxlength="80"></label><label class="store-field">详细地址<input id="employee-store-address" value="${esc(x.address)}" placeholder="省、市、区县、街道、门牌号" required maxlength="200"></label><label class="store-field">联系电话<input id="employee-store-phone" type="tel" value="${esc(x.phone)}" required maxlength="40"></label><div class="actions"><button type="button" onclick="closeModal()">取消</button><button type="submit" class="primary">保存门店信息</button></div></form>`,
+  );
+}
+function saveEmployeeStore() {
+  const x = {
+    name: document.getElementById("employee-store-name").value.trim(),
+    address: document.getElementById("employee-store-address").value.trim(),
+    phone: document.getElementById("employee-store-phone").value.trim(),
+  };
+  if (!x.name || !x.address || !x.phone)
+    return toast("请填写完整的门店名称、地址和电话");
+  data.employeeStore = x;
+  save();
+  closeModal();
+  render();
+  toast("门店信息已保存");
+}
+const employeeWeeklyDemo = [
+  { date: "11/07", sales: 920, customers: 2 },
+  { date: "11/08", sales: 1380, customers: 3 },
+  { date: "11/09", sales: 1180, customers: 1 },
+  { date: "11/10", sales: 1860, customers: 4 },
+  { date: "11/11", sales: 1640, customers: 2 },
+  { date: "11/12", sales: 2280, customers: 5 },
+  { date: "11/13", sales: 3840, customers: 3 },
+];
+function bossSalesTrend() {
+  const rows = employeeWeeklyDemo.map((x, i) => ({
+    ...x,
+    sales: [2800, 4800, 3840, 6400, 5200, 7600, 8640][i],
+  }));
+  return `<div class="boss-sales-trend">${employeeBarChart("sales", "销售额（元）", "元", rows)}</div><button onclick="go('门店信息')">查看门店数据 →</button>`;
+}
+function employeeTrendCharts() {
+  return `<div class="employee-trends">${employeeBarChart("sales", "近七日销售额", "元")}${employeeBarChart("customers", "近七日客户增长量", "人")}</div>`;
+}
+function employeeBarChart(key, title, unit, rows = employeeWeeklyDemo) {
+  const maximum =
+    key === "sales"
+      ? Math.ceil(Math.max(...rows.map((x) => x.sales)) / 1000) * 1000
+      : 6;
+  const total = rows.reduce((sum, x) => sum + x[key], 0);
+  const formatter = (n) => Number(n).toLocaleString("zh-CN");
+  const plot = { left: 64, right: 466, top: 38, bottom: 224 };
+  const width = (plot.right - plot.left) / 7;
+  const svg = `<svg class="weekly-chart" viewBox="0 0 480 274" role="img" aria-label="${title}柱状图，${rows.map((x) => x.date + "：" + formatter(x[key]) + unit).join("；")}"><text x="5" y="18" fill="#7b8974" font-size="17">${unit}</text>${[
+    0, 1, 2, 3,
+  ]
+    .map((i) => {
+      const v = (maximum * i) / 3;
+      const y = plot.bottom - ((plot.bottom - plot.top) * i) / 3;
+      return `<line x1="${plot.left}" y1="${y}" x2="${plot.right}" y2="${y}" stroke="#e7ede2" stroke-dasharray="${i ? "4 5" : "0"}"/><text x="${plot.left - 10}" y="${y + 6}" fill="#7b8974" font-size="17" text-anchor="end">${Math.round(v).toLocaleString()}</text>`;
+    })
+    .join("")}${rows
+    .map((row, i) => {
+      const v = row[key];
+      const height = (v / maximum) * (plot.bottom - plot.top);
+      const x = plot.left + i * width + width * 0.22;
+      const y = plot.bottom - height;
+      return `<g><rect tabindex="0" role="img" aria-label="${row.date} ${formatter(v)}${unit}" class="weekly-bar ${key === "customers" ? "customer-growth-bar" : ""}" x="${x}" y="${y}" width="${width * 0.56}" height="${height}" rx="5"><title>${row.date}：${formatter(v)}${unit}</title></rect><text x="${x + width * 0.28}" y="${y - 9}" text-anchor="middle" fill="#3f5a35" font-size="17">${formatter(v)}</text><text x="${x + width * 0.28}" y="253" text-anchor="middle" fill="#7b8974" font-size="17">${row.date}</text></g>`;
+    })
+    .join("")}</svg>`;
+  return `<section class="card employee-trend-card"><div class="trend-card-heading"><h2>${title}</h2><span class="badge">演示</span></div><div class="trend-total">${key === "sales" ? "¥ " : ""}${formatter(total)}<span>${key === "sales" ? "七日合计" : "人 · 七日新增"}</span></div>${svg}<details class="trend-data"><summary>查看每日数据</summary><table><thead><tr><th>日期</th><th>${key === "sales" ? "销售额（元）" : "新增客户（人）"}</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${x.date}</td><td>${formatter(x[key])}</td></tr>`).join("")}</tbody></table></details></section>`;
+}
+function metrics() {
+  return `<div class="grid">${(configs[role].boss
+    ? [
+        ["客户总数", "2,460"],
+        ["今日新增", "12"],
+        ["门店数量", "3"],
+        ["今日销售额", "¥ 8,640"],
+      ]
+    : [
+        ["我的客户", "128"],
+        ["今日待办", data.tasks.filter((t) => !t.done).length],
+        ["本月销售额", "¥ 12,860"],
+        ["本月服务", "36"],
+      ]
+  )
+    .map((x) => `<div class="card metric">${x[0]}<b>${x[1]}</b></div>`)
+    .join("")}</div>`;
+}
+function tasks() {
+  return data.tasks
+    .map(
+      (t, i) =>
+        `<div class="row"><label><input style="width:auto;margin-right:10px" type="checkbox" ${t.done ? "checked" : ""} onchange="data.tasks[${i}].done=this.checked;save();render()">${esc(t.text)}</label></div>`,
+    )
+    .join("");
+}
+function content() {
+  const c = configs[role];
+  if (["首页", "总览"].includes(page))
+    return `${!c.boss ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日待办"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
+  if (page === "门店信息") return storePage();
+  if (employeeCustomersVisible()) return employeeCustomerPage();
+  if (["顾客信息", "客户信息"].includes(page))
+    return `<button class="primary" onclick="edit('customers')">＋ 新建客户</button><h2>按顾客时期分类</h2><div class="grid" style="margin:16px 0">${["一段", "二段", "三段", "四段"].map((v) => `<button class="card metric ${customerStage === v ? "primary" : ""}" style="text-align:left" onclick="customerStage='${v}';render()"><span style="font-size:16px;font-weight:bold">${v}时期顾客</span><strong style="display:block;font-size:28px;margin:12px 0">${data.customers.filter((x) => x.stage === v).length} 位</strong><span>查看该时期全部顾客 →</span></button>`).join("")}</div><div class="top"><h2>${customerStage ? customerStage + "时期顾客" : "全部顾客"} · ${data.customers.filter((x) => !customerStage || x.stage === customerStage).length} 位</h2>${customerStage ? `<button onclick="customerStage='';render()">查看全部顾客</button>` : ""}</div><input placeholder="搜索姓名、微信、联系方式、门店…" oninput="filter(this.value)"><div class="grid">${data.customers.map((x, i) => (customerStage && x.stage !== customerStage ? "" : `<div class="card customer searchable" onclick="detail(${i})"><div class="row" style="padding-top:0"><div class="avatar">${esc(x.name.slice(-2))}</div><b>${esc(x.name)}</b></div><p>${esc(x.baby)} · ${esc(x.stage ? x.stage + "时期" : "时期未设置")}</p><div class="muted">微信：${esc(x.wechat || "未填写")}<br>联系方式：${esc(x.phone || "未填写")}</div><p>${esc(x.note)}</p><div class="muted">${esc(x.store || "未填写门店")} · 累计消费 ¥ ${Number(x.amount || 0).toLocaleString()}</div><p class="muted">最近联系：${esc(x.lastContact || "未记录")}<br>下次联系：${esc(x.nextContact || "未安排")}</p><div class="muted">查看档案 →</div></div>`)).join("")}</div>`;
+  if (page === "知识库") return knowledgePage();
+  if (["商品", "服务与商品"].includes(page))
+    return `<button class="primary" onclick="edit('products')">＋ 填写商品信息</button><p class="notice">点击上方按钮新建；点击卡片的“编辑商品信息”填写价格、规格、库存等。下面已提供完整虚构样例，可直接编辑参考。</p><input placeholder="搜索商品或服务…" oninput="filter(this.value)">${cards("products")}`;
+  if (page === "微信数据")
+    return `<div class="card"><h2>微信数据${c.boss ? "导出" : "导入"}</h2><p>${c.boss ? "按门店与日期选择，导出客户经营数据。" : "选择聊天文件，整理到客户档案。"}</p><input type="date" value="2026-11-13">${c.boss ? '<button class="primary" onclick="download()">导出示例 CSV</button>' : '<input type="file" onchange="toast(&quot;已选择文件，原型不读取或上传文件内容&quot;)">'}<p class="notice">演示入口，不连接真实微信。</p></div>`;
+  if (page === "自动回复")
+    return `<div class="card"><h2>自动回复设置</h2><label><input style="width:auto" type="checkbox" ${data.auto ? "checked" : ""} onchange="data.auto=this.checked;save();toast('设置已保存到原型')"> 启用自动回复（演示）</label><p>遇到超出知识库的问题，转交销售人工处理。</p><textarea id="reply" placeholder="输入欢迎语">${esc(data.reply || "你好，欢迎来到青禾母婴，请问有什么可以帮你？")}</textarea><button class="primary" onclick="data.reply=document.getElementById('reply').value;save();toast('欢迎语已保存')">保存</button></div>`;
+  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div><h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
+}
+function cards(key) {
+  if (key === "products") return productCards();
+  return (
+    '<div class="grid">' +
+    data[key]
+      .map(
+        (x, i) =>
+          `<div class="card searchable"><h2>${esc(x.name)}</h2><p>${esc(x.note)}</p><button onclick="edit('${key}',${i})">编辑</button> <button onclick="if(confirm('删除这条示例？')){data['${key}'].splice(${i},1);save();render()}">移除</button></div>`,
+      )
+      .join("") +
+    "</div>"
+  );
+}
+function filter(v) {
+  document
+    .querySelectorAll(".searchable")
+    .forEach(
+      (x) => (x.style.display = x.textContent.includes(v) ? "" : "none"),
+    );
+}
+function modal(s) {
+  const el = document.getElementById("modal");
+  el.innerHTML =
+    '<div class="modal-closebar"><button type="button" class="modal-close-button" aria-label="关闭弹窗" title="关闭" onclick="closeModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>' +
+    s;
+  el.scrollTop = 0;
+  el.showModal();
+}
+function closeModal() {
+  document.getElementById("modal").close();
+}
+function edit(key, i = -1) {
+  if (key === "products") return editProduct(i);
+  const x = data[key][i] || {};
+  modal(
+    `<h2>${i < 0 ? "新增" : "编辑"}${key === "customers" ? "客户" : "内容"}</h2><input id="name" placeholder="名称" value="${esc(x.name || "")}">${key === "knowledge" ? knowledgeCategoryField(x) : ""}${key === "customers" ? `<input id="baby" placeholder="宝宝月龄" value="${esc(x.baby || "")}">${customerFields(x)}` : ""}<textarea id="note" placeholder="备注 / 说明">${esc(x.note || "")}</textarea><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="commit('${key}',${i})">保存</button></div>`,
+  );
+}
+function commit(key, i) {
+  let x = {
+    name: document.getElementById("name").value.trim(),
+    note: document.getElementById("note").value,
+  };
+  if (!x.name) return toast("请填写名称");
+  if (key === "customers") {
+    x.baby = document.getElementById("baby").value;
+    for (const k of ["wechat", "phone", "store", "lastContact", "nextContact"])
+      x[k] = document.getElementById(k).value;
+    x.amount = Number(document.getElementById("amount").value) || 0;
+    x.stage = document.getElementById("stage").value;
+  }
+  if (key === "knowledge")
+    x.category = document.getElementById("knowledge-category").value;
+  if (i < 0) data[key].push(x);
+  else data[key][i] = x;
+  save();
+  closeModal();
+  render();
+  toast("已保存，可在当前浏览器继续修改");
+}
+function customerFields(x) {
+  return (
+    `<label style="display:block;margin-top:10px">顾客所处时期<select id="stage"><option value="">请选择顾客时期</option>${["一段", "二段", "三段", "四段"].map((v) => `<option value="${v}" ${x.stage === v ? "selected" : ""}>${v}时期</option>`).join("")}</select></label>` +
+    [
+      ["wechat", "微信号", "text"],
+      ["phone", "联系方式", "text"],
+      ["store", "消费门店", "text"],
+      ["amount", "累计消费额（元）", "number"],
+      ["lastContact", "最近联系时间", "datetime-local"],
+      ["nextContact", "下次联系时间", "datetime-local"],
+    ]
+      .map(
+        ([k, t, type]) =>
+          `<label style="display:block;margin-top:10px">${t}<input id="${k}" type="${type}" ${type === "number" ? 'min="0" step="0.01"' : ""} value="${esc(x[k] ?? "")}"></label>`,
+      )
+      .join("")
+  );
+}
+function detail(i) {
+  let x = data.customers[i];
+  modal(
+    `<button onclick="closeModal()">← 返回客户列表</button><h2>${esc(x.name)} · 客户档案</h2><p>${esc(x.baby)}</p><h2>联系与消费信息</h2>${[
+      ["顾客所处时期", x.stage ? x.stage + "时期" : "未设置"],
+      ["微信号", x.wechat || "未填写"],
+      ["联系方式", x.phone || "未填写"],
+      ["消费门店", x.store || "未填写"],
+      ["累计消费额", "¥ " + Number(x.amount || 0).toLocaleString()],
+      ["最近联系时间", (x.lastContact || "未记录").replace("T", " ")],
+      ["下次联系时间", (x.nextContact || "未安排").replace("T", " ")],
+    ]
+      .map(
+        ([k, v]) =>
+          `<div class="row"><span class="muted">${k}</span><span>${esc(v)}</span></div>`,
+      )
+      .join(
+        "",
+      )}<h2>客户备注</h2><div class="card">${esc(x.note)}</div><p class="notice">当前联系方式与消费数据均为虚构示例，可点击编辑修改。</p><div class="actions"><button onclick="closeModal()">关闭</button><button class="primary" onclick="closeModal();edit('customers',${i})">编辑档案</button></div>`,
+  );
+}
+const stores = [
+  {
+    name: "城南店",
+    province: "广东省",
+    city: "广州市",
+    district: "海珠区",
+    address: "青禾路128号1楼101室",
+    manager: "陈店长",
+    phone: "020-0000-1001",
+    customers: 860,
+    employees: 6,
+    today: 3840,
+    week: 18460,
+    month: 78640,
+  },
+  {
+    name: "万达店",
+    province: "广东省",
+    city: "广州市",
+    district: "白云区",
+    address: "云景路66号万达广场2楼205室",
+    manager: "林店长",
+    phone: "020-0000-1002",
+    customers: 780,
+    employees: 8,
+    today: 3040,
+    week: 21680,
+    month: 92480,
+  },
+  {
+    name: "滨江店",
+    province: "广东省",
+    city: "深圳市",
+    district: "南山区",
+    address: "滨江路28号A座103室",
+    manager: "周店长",
+    phone: "0755-0000-1003",
+    customers: 700,
+    employees: 4,
+    today: 5240,
+    week: 25800,
+    month: 108600,
+  },
+  {
+    name: "西湖店",
+    province: "浙江省",
+    city: "杭州市",
+    district: "西湖区",
+    address: "青禾街18号102室",
+    manager: "许店长",
+    phone: "0571-0000-1004",
+    customers: 920,
+    employees: 7,
+    today: 4680,
+    week: 23860,
+    month: 98600,
+  },
+  {
+    name: "桐庐店",
+    province: "浙江省",
+    city: "杭州市",
+    district: "桐庐县",
+    address: "迎春南路56号1楼",
+    manager: "李店长",
+    phone: "0571-0000-1005",
+    customers: 460,
+    employees: 3,
+    today: 1860,
+    week: 9800,
+    month: 42600,
+  },
+];
+let sf = {
+  province: "",
+  city: "",
+  district: "",
+  sort: "customers",
+  direction: "desc",
+  query: "",
+};
+const unique = (key, rows) => [...new Set(rows.map((x) => x[key]))];
+function opts(values, current, label) {
+  return (
+    '<option value="">' +
+    label +
+    "</option>" +
+    values
+      .map(
+        (v) => `<option ${v === current ? "selected" : ""}>${esc(v)}</option>`,
+      )
+      .join("")
+  );
+}
+function storePage() {
+  const cities = sf.province
+    ? unique(
+        "city",
+        stores.filter((x) => x.province === sf.province),
+      )
+    : [];
+  const districts = sf.city
+    ? unique(
+        "district",
+        stores.filter((x) => x.province === sf.province && x.city === sf.city),
+      )
+    : [];
+  return `<div class="card"><div class="muted">按所在地筛选</div><div class="geo"><label>省份<select onchange="setStoreFilter('province',this.value)">${opts(unique("province", stores), sf.province, "全部省份")}</select></label><label>城市<select ${!sf.province ? "disabled" : ""} onchange="setStoreFilter('city',this.value)">${opts(cities, sf.city, "全部城市")}</select></label><label>区 / 县<select ${!sf.city ? "disabled" : ""} onchange="setStoreFilter('district',this.value)">${opts(districts, sf.district, "全部区县")}</select></label></div><input aria-label="搜索门店" placeholder="搜索门店、地址、负责人…" value="${esc(sf.query)}" oninput="sf.query=this.value;updateStores()"><div class="geo"><label>排序指标<select onchange="setStoreFilter('sort',this.value)">${[
+    ["customers", "顾客人数"],
+    ["employees", "员工人数"],
+    ["today", "今日销售额"],
+  ]
+    .map(
+      ([v, t]) =>
+        `<option value="${v}" ${sf.sort === v ? "selected" : ""}>${t}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label>排序方向<select onchange="setStoreFilter('direction',this.value)"><option value="desc" ${sf.direction === "desc" ? "selected" : ""}>从高到低</option><option value="asc" ${sf.direction === "asc" ? "selected" : ""}>从低到高</option></select></label></div><button onclick="sf={province:'',city:'',district:'',sort:'customers',direction:'desc',query:''};render()">重置筛选</button><p class="muted">所在地仅列出示例门店覆盖的地区，地址、负责人、号码均为虚构演示。</p></div><p id="store-count"></p><div id="store-list" class="grid"></div>`;
+}
+function setStoreFilter(k, v) {
+  sf[k] = v;
+  if (k === "province") {
+    sf.city = "";
+    sf.district = "";
+  }
+  if (k === "city") sf.district = "";
+  render();
+}
+function updateStores() {
+  const list = document.getElementById("store-list");
+  if (!list) return;
+  const rows = stores
+    .filter(
+      (x) =>
+        (!sf.province || x.province === sf.province) &&
+        (!sf.city || x.city === sf.city) &&
+        (!sf.district || x.district === sf.district) &&
+        [x.name, x.province, x.city, x.district, x.address, x.manager]
+          .join("")
+          .includes(sf.query),
+    )
+    .sort(
+      (a, b) => (sf.direction === "asc" ? 1 : -1) * (a[sf.sort] - b[sf.sort]),
+    );
+  document.getElementById("store-count").textContent =
+    "符合条件的门店：" + rows.length + " 家";
+  list.innerHTML = rows.length
+    ? rows
+        .map(
+          (x) =>
+            `<div class="card"><h2>青禾母婴 · ${x.name}</h2><div class="muted">${x.province} · ${x.city} · ${x.district}</div><p>顾客 ${x.customers} 人 ｜ 员工 ${x.employees} 人</p><span class="badge">今日销售 ¥ ${x.today.toLocaleString()}</span><br><br><button onclick="store('${x.name}')">查看详情 →</button></div>`,
+        )
+        .join("")
+    : '<div class="card wide"><h2>暂无符合条件的门店</h2><p>请调整所在地或搜索关键词。</p></div>';
+}
+function store(name) {
+  const x = stores.find((x) => x.name === name);
+  modal(
+    `<h2>青禾母婴 · ${esc(x.name)}</h2><div class="notice">门店信息与经营数据 · 均为演示</div><h2>门店位置</h2><p>${esc(x.province + x.city + x.district + x.address)}</p><div class="row"><span>负责人</span><b>${esc(x.manager)}</b></div><div class="row"><span>负责人联系方式</span><span>${esc(x.phone)}</span></div><h2>经营数据</h2><div class="grid">${[
+      ["服务顾客", x.customers + " 人"],
+      ["员工人数", x.employees + " 人"],
+      ["当日销售额", "¥ " + x.today.toLocaleString()],
+      ["当周销售额", "¥ " + x.week.toLocaleString()],
+      ["当月销售额", "¥ " + x.month.toLocaleString()],
+    ]
+      .map(
+        ([t, v]) =>
+          `<div class="card metric">${t}<b style="font-size:23px">${v}</b></div>`,
+      )
+      .join(
+        "",
+      )}</div><p class="muted">当周按周一至今统计，当月按本月1日至今统计。</p><div class="actions"><button onclick="closeModal()">关闭</button><button class="primary" onclick="closeModal();go('客户信息')">查看顾客</button></div>`,
+  );
+}
+function campaign() {
+  modal(
+    `<h2>创建活动</h2><input id="campaign" placeholder="活动名称，如周末母婴体验日"><textarea placeholder="活动介绍与服务内容"></textarea><h2>选择目标客户</h2>${data.customers.map((x) => `<div><label><input type="checkbox" style="width:auto"> ${esc(x.name)} · ${esc(x.store || "未填写门店")}</label></div>`).join("")}<div class="notice">演示仅生成提示，不会发送微信。</div><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="closeModal();toast('已生成示例活动任务，未实际发送')">生成任务</button></div>`,
+  );
+}
+function download() {
+  const text =
+    "姓名,宝宝信息,微信号,联系方式,消费门店,累计消费额,最近联系时间,下次联系时间\n" +
+    data.customers
+      .map((x) =>
+        [
+          x.name,
+          x.baby,
+          x.wechat || "",
+          x.phone || "",
+          x.store || "",
+          x.amount || 0,
+          x.lastContact || "",
+          x.nextContact || "",
+        ]
+          .map((v) => '"' + String(v).replaceAll('"', '""') + '"')
+          .join(","),
+      )
+      .join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(
+    new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" }),
+  );
+  a.download = "客序-示例客户.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+const productFields = [
+  ["name", "商品 / 服务名称", "text", "如：青禾轻柔婴儿纸尿裤"],
+  ["kind", "类型", "select", ""],
+  ["category", "分类", "text", "如：婴儿护理 / 纸尿裤"],
+  ["brand", "品牌", "text", "如：青禾（虚构品牌）"],
+  ["sku", "商品编号", "text", "如：QH-DP-M64"],
+  ["price", "销售价格（元）", "number", "89.00"],
+  ["spec", "规格 / 服务时长", "text", "如：M码 · 64片 / 包"],
+  ["stock", "库存数量 / 可预约名额", "number", "36"],
+  ["unit", "计价单位", "text", "包 / 罐 / 次"],
+  ["audience", "适用对象", "text", "如：M码，按包装体重范围选择"],
+  ["selling", "商品卖点 / 服务内容", "textarea", "写清实际特点，不夸大功效"],
+  ["usage", "使用方式 / 预约流程", "textarea", "写清使用步骤或服务流程"],
+  [
+    "afterSales",
+    "售后 / 取消规则",
+    "textarea",
+    "如：未拆封退换规则、预约取消方式",
+  ],
+  ["note", "补充说明", "textarea", "其他需要员工或客户了解的信息"],
+];
+function ensureProducts() {
+  if (data.productVersion === 2) return;
+  data.products = data.products.map((x) => ({
+    ...x,
+    kind: x.name.includes("服务") || x.name.includes("咨询") ? "服务" : "商品",
+  }));
+  if (!data.products.some((x) => x.sku === "QH-DP-M64"))
+    data.products.unshift({
+      name: "青禾轻柔婴儿纸尿裤（完整样例）",
+      kind: "商品",
+      category: "婴儿护理 / 纸尿裤",
+      brand: "青禾（虚构品牌）",
+      sku: "QH-DP-M64",
+      price: 89,
+      spec: "M码 · 64片 / 包",
+      stock: 36,
+      unit: "包",
+      shops: "城南店、万达店",
+      audience: "M码；具体体重范围请以实际商品包装为准。",
+      selling:
+        "柔软表层，腰围可调节；附尿湿提示设计。此处仅为虚构商品的填写示例。",
+      usage:
+        "1. 按实际包装指引选择尺码。\n2. 展开纸尿裤，调整腰围松紧。\n3. 根据实际使用情况及时更换。",
+      afterSales:
+        "示例规则：未拆封、包装完好并有购物凭证，购买后7天内可到原消费门店申请退换；已拆封商品按实际质量问题处理。",
+      note: "这是虚构样例，价格、库存、卖点、售后均供布局参考，请替换为真实商品信息。",
+    });
+  data.productVersion = 2;
+  save();
+}
+function productCards() {
+  ensureProducts();
+  return (
+    '<div class="grid">' +
+    data.products
+      .map(
+        (x, i) =>
+          `<div class="card searchable"><span class="badge">${esc(x.kind || "商品")}</span><h2>${esc(x.name)}</h2><p>${esc(x.spec || x.note || "尚未填写规格")}</p><div class="row"><b style="font-size:23px;color:#547c45">${x.price !== undefined ? "¥ " + Number(x.price).toFixed(2) : "价格待填写"}${x.unit ? " / " + esc(x.unit) : ""}</b><span class="muted">${x.stock !== undefined ? "库存 / 名额 " + esc(x.stock) : "库存待填写"}</span></div><p class="muted">编号：${esc(x.sku || "待填写")}</p><div class="tabs"><button onclick="productDetail(${i})">查看完整信息</button><button class="primary" onclick="editProduct(${i})">编辑商品信息</button><button onclick="if(confirm('移除此商品？')){data.products.splice(${i},1);save();render()}">移除</button></div></div>`,
+      )
+      .join("") +
+    "</div>"
+  );
+}
+function editProduct(i = -1) {
+  const x = data.products[i] || { kind: "商品" };
+  modal(
+    `<h2>${i < 0 ? "新增" : "编辑"}商品信息</h2><p class="notice">名称和销售价格为必填项；其他字段可按实际商品补充。保存后会显示在商品列表中。</p><form onsubmit="event.preventDefault();commitProduct(${i})">${productFields.map(([k, t, type, ph]) => `<label style="display:block;margin-top:14px">${t}${["name", "price"].includes(k) ? " *" : ""}${type === "select" ? `<select id="pf-${k}"><option ${x.kind === "商品" ? "selected" : ""}>商品</option><option ${x.kind === "服务" ? "selected" : ""}>服务</option></select>` : type === "textarea" ? `<textarea id="pf-${k}" placeholder="${ph}">${esc(x[k] ?? "")}</textarea>` : `<input id="pf-${k}" type="${type}" placeholder="${ph}" value="${esc(x[k] ?? "")}" ${["name", "price"].includes(k) ? "required" : ""} ${type === "number" ? 'min="0" step="' + (k === "price" ? "0.01" : "1") + '"' : ""}>`}</label>`).join("")}<div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">保存商品信息</button></div></form>`,
+  );
+}
+function commitProduct(i) {
+  const x = {};
+  productFields.forEach(([k]) => {
+    let v = document.getElementById("pf-" + k).value.trim();
+    if (["price", "stock"].includes(k) && v !== "") v = Number(v);
+    if (v !== "") x[k] = v;
+  });
+  if (!x.name || x.price === undefined) return toast("请填写名称和销售价格");
+  if (i < 0) data.products.push(x);
+  else data.products[i] = x;
+  save();
+  closeModal();
+  render();
+  toast("商品信息已保存");
+}
+function productDetail(i) {
+  const x = data.products[i];
+  modal(
+    `<button onclick="closeModal()">← 返回商品列表</button><h2>${esc(x.name)}</h2>${productFields
+      .filter(([k]) => k !== "name")
+      .map(
+        ([k, t]) =>
+          `<h2 style="font-size:14px">${t}</h2><p style="white-space:pre-wrap">${esc(x[k] ?? "未填写")}</p>`,
+      )
+      .join(
+        "",
+      )}<div class="actions"><button onclick="closeModal()">关闭</button><button class="primary" onclick="closeModal();editProduct(${i})">编辑商品信息</button></div>`,
+  );
+}
+function migrateStages() {
+  if (data.stageVersion === 1) return;
+  data.customers.forEach((x, i) => {
+    x.stage = x.stage || ["一段", "二段", "三段", "四段"][i % 4];
+  });
+  data.stageVersion = 1;
+  save();
+}
+function migrateCustomers() {
+  if (data.customerFieldsVersion === 1) return;
+  data.customers.forEach((x, i) => {
+    delete x.tag;
+    Object.assign(x, {
+      wechat: x.wechat || "demo_customer_" + (i + 1),
+      phone: x.phone || "未提供（示例）",
+      store: x.store || "青禾母婴 · " + ["城南店", "万达店", "滨江店"][i % 3],
+      amount: x.amount ?? [899, 1668, 910, 298][i % 4],
+      lastContact: x.lastContact || "2026-11-13T10:00",
+      nextContact: x.nextContact || "2026-11-16T14:00",
+    });
+  });
+  data.customerFieldsVersion = 1;
+  save();
+}
+ensureProducts();
+migrateCustomers();
+const knowledgeCategories = ["产品", "服务", "专业", "其他"];
+let knowledgeCategory = "";
+let knowledgeQuery = "";
+function migrateKnowledge() {
+  let changed = false;
+  data.knowledge.forEach((x) => {
+    if (!knowledgeCategories.includes(x.category)) {
+      x.category = x.name.includes("DHA") ? "专业" : "其他";
+      changed = true;
+    }
+  });
+  if (changed) save();
+}
+function knowledgeCategoryField(x) {
+  const chosen = x.category || knowledgeCategory || "其他";
+  return `<label style="display:block;margin:14px 0">知识分类<select id="knowledge-category" aria-label="知识分类">${knowledgeCategories.map((c) => `<option value="${c}" ${chosen === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>`;
+}
+function knowledgePage() {
+  return `<div class="tabs"><button class="primary" onclick="edit('knowledge')">＋ 添加知识</button><button onclick="go('顾客信息')">查看用户信息</button></div><h2>知识分类</h2><div class="grid knowledge-categories">${knowledgeCategories.map((c) => `<button class="card metric knowledge-category ${knowledgeCategory === c ? "active" : ""}" aria-label="查看${c}知识" aria-pressed="${knowledgeCategory === c}" onclick="knowledgeCategory='${c}';render()"><span class="knowledge-category-name">${c}</span><strong>${data.knowledge.filter((x) => x.category === c).length} 条知识</strong></button>`).join("")}</div><div class="knowledge-results-heading"><h2>${knowledgeCategory ? knowledgeCategory + "知识" : "全部知识"}</h2>${knowledgeCategory ? `<button onclick="knowledgeCategory='';render()">查看全部</button>` : ""}</div><input aria-label="搜索知识" placeholder="搜索知识标题或内容…" value="${esc(knowledgeQuery)}" oninput="knowledgeQuery=this.value;updateKnowledge()"><p class="muted" id="knowledge-count"></p><div id="knowledge-list" class="grid"></div>`;
+}
+function updateKnowledge() {
+  const target = document.getElementById("knowledge-list");
+  if (!target) return;
+  const query = knowledgeQuery.trim().toLocaleLowerCase();
+  const rows = data.knowledge
+    .map((x, i) => ({ x, i }))
+    .filter(
+      ({ x }) =>
+        (!knowledgeCategory || x.category === knowledgeCategory) &&
+        [x.name, x.note, x.category]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query),
+    );
+  document.getElementById("knowledge-count").textContent =
+    `共 ${rows.length} 条知识`;
+  target.innerHTML = rows.length
+    ? rows
+        .map(
+          ({ x, i }) =>
+            `<article class="card"><span class="badge">${esc(x.category)}</span><h2>${esc(x.name)}</h2><p>${esc(x.note)}</p><div class="tabs"><button onclick="edit('knowledge',${i})">编辑</button><button onclick="if(confirm('删除这条知识？')){data.knowledge.splice(${i},1);save();render()}">移除</button></div></article>`,
+        )
+        .join("")
+    : `<div class="card wide"><h2>暂无${knowledgeCategory || "匹配的"}知识</h2><p>${query ? "请调整搜索关键词，或添加新的知识。" : "点击“添加知识”，为此分类填写内容。"}</p><button class="primary" onclick="edit('knowledge')">＋ 添加知识</button></div>`;
+}
+const originalRender = render;
+render = function () {
+  migrateCustomers();
+  migrateStages();
+  migrateKnowledge();
+  originalRender();
+  updateStores();
+  updateEmployeeCustomers();
+  updateKnowledge();
+};
+// 本文件固定打开员工小程序，不受地址中的角色参数影响。
+const initialRole = 1;
+if (initialRole >= 0 && initialRole < 4) {
+  role = initialRole;
+  page = configs[role].nav[0];
+}
+const initialPage = new URLSearchParams(location.search).get("page");
+if (initialPage) page = initialPage;
+if (new URLSearchParams(location.search).has("embed")) {
+  document.head.insertAdjacentHTML(
+    "beforeend",
+    "<style>header,.hint{display:none}.shell{margin:10px auto}.shell:not(.mobile){min-height:760px;border-radius:16px}.shell:not(.mobile) .sidebar{width:140px;padding:22px 12px}.shell:not(.mobile) .main{padding:22px}.shell.mobile{min-height:780px}</style>",
+  );
+}
+render();
+
+  </script>
+</body>
+</html>

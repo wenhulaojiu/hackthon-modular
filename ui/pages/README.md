@@ -1,0 +1,22 @@
+# 四端独立页面
+
+这四个 HTML 是本次 UI 原型的独立单文件版本，分别固定一个角色，不显示四端切换栏。每个文件都已内嵌 CSS、JavaScript 和虚构示例数据，**复制其中任意一个文件到其他目录，也能直接用浏览器或编辑器打开**，无需父目录文件、npm 依赖或后端。
+
+| 页面 | 文件 |
+| --- | --- |
+| 老板小程序 | [boss-mini.html](boss-mini.html) |
+| 员工小程序 | [staff-mini.html](staff-mini.html) |
+| 老板网页 | [boss-web.html](boss-web.html) |
+| 员工网页 | [staff-web.html](staff-web.html) |
+
+## 体验与修改
+
+- 直接双击对应 HTML，或用编辑器的静态服务器打开。需要浏览器允许本地存储。
+- 每个入口仍包含该角色的全部导航页面、编辑表单与弹窗；“小程序”是网页中的手机界面原型。
+- 从仓库根目录运行 `python -m http.server 5189 --bind 127.0.0.1 --directory ui`，然后打开 `http://127.0.0.1:5189/pages/staff-mini.html` 等地址。
+- agent 可以只修改指定 HTML 中的 `<style>` 和 `<script>`，不同角色文件可分别维护。
+- 这是整理时的独立副本。修改这些文件不会自动修改其他独立页面或上一级的四端入口。若要统一四端，请修改上一级 `app.js`、`styles.css` 后同步独立副本。
+- 同一浏览器、同一站点下仍共用 `kexu-prototype` 本地存储；不同设备或浏览器不自动同步。
+- 所有数据均为虚构示例，不连接真实微信、登录或数据库。
+
+原四端切换入口仍保留在 [../index.html](../index.html)，布局总览在 [../overview.html](../overview.html)。
