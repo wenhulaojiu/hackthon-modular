@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+  <meta charset="utf-8" /><title>客序 · 完整页面布局图</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 38px;
+      background: #edf2eb;
+      color: #24392d;
+      font-family: "Microsoft YaHei", sans-serif;
+    }
+    h1 {
+      font-size: 29px;
+      margin: 0 0 10px;
+    }
+    p {
+      color: #7b8973;
+      font-size: 13px;
+    }
+    h2 {
+      font-size: 21px;
+      margin: 26px 0 16px;
+    }
+    .row {
+      display: flex;
+      gap: 18px;
+    }
+    .screen {
+      width: 280px;
+      background: #fff;
+      border: 1px solid #d9e2d3;
+      border-radius: 23px;
+      overflow: hidden;
+      box-shadow: 0 8px 24px #34452b08;
+    }
+    .caption {
+      font-size: 14px;
+      padding: 15px 17px 8px;
+      font-weight: bold;
+    }
+    .view {
+      width: 278px;
+      height: 654px;
+      overflow: hidden;
+      position: relative;
+    }
+    iframe {
+      border: 0;
+      width: 420px;
+      height: 990px;
+      transform: scale(0.662);
+      transform-origin: top left;
+    }
+    .web {
+      width: 578px;
+      border-radius: 17px;
+    }
+    .web .view {
+      width: 576px;
+      height: 490px;
+    }
+    .web iframe {
+      width: 1152px;
+      height: 980px;
+      transform: scale(0.5);
+    }
+    .note {
+      font-size: 12px;
+      line-height: 1.8;
+      color: #7b8973;
+      margin-top: 22px;
+    }
+  </style>
+  <h1>客序 · 当前 UI 完整页面示意</h1>
+  <p>
+    按参考图横向展开各页面 · 保留四宫格与双列排布 · 页面内容来自当前交互原型
+  </p>
+  <h2>01　老板小程序 · 四个底部入口</h2>
+  <div class="row">
+    <div class="screen">
+      <div class="caption">首页</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=0&embed=1&page=%E9%A6%96%E9%A1%B5"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">门店信息</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=0&embed=1&page=%E9%97%A8%E5%BA%97%E4%BF%A1%E6%81%AF"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">知识库</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=0&embed=1&page=%E7%9F%A5%E8%AF%86%E5%BA%93"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">我的</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=0&embed=1&page=%E6%88%91%E7%9A%84"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+  <h2>02　员工小程序 · 四个底部入口</h2>
+  <div class="row">
+    <div class="screen">
+      <div class="caption">首页</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=1&embed=1&page=%E9%A6%96%E9%A1%B5"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">顾客信息</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=1&embed=1&page=%E9%A1%BE%E5%AE%A2%E4%BF%A1%E6%81%AF"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">服务与商品</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=1&embed=1&page=%E6%9C%8D%E5%8A%A1%E4%B8%8E%E5%95%86%E5%93%81"
+        ></iframe>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="caption">我的</div>
+      <div class="view">
+        <iframe
+          src="index.html?role=1&embed=1&page=%E6%88%91%E7%9A%84"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+  <h2>03　网页端 · 老板与员工工作台</h2>
+  <div class="row">
+    <div class="screen web">
+      <div class="caption">老板网页 · 全店经营</div>
+      <div class="view"><iframe src="index.html?role=2&embed=1"></iframe></div>
+    </div>
+    <div class="screen web">
+      <div class="caption">员工网页 · 我的工作台</div>
+      <div class="view"><iframe src="index.html?role=3&embed=1"></iframe></div>
+    </div>
+  </div>
+  <div class="note">
+    当前页面布局与交互原型保持一致。门店筛选、客户时期分类、商品详细字段均已纳入；长页面展示首屏，详情可在交互原型中展开。<br />所有经营数字、客户与商品均为演示数据。
+  </div>
+</html>
