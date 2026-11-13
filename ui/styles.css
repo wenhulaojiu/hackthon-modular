@@ -929,3 +929,107 @@ button, input, textarea, select { font-size: 15px; }
 @media (max-width: 900px) {
   .knowledge-web { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* 实际设备布局：去掉演示外壳和模拟设备边框，页面铺满浏览器。 */
+html, body { min-height: 100%; background: #fff; }
+body { margin: 0; min-height: 100dvh; }
+
+.shell, .shell.mobile {
+  width: 100%; max-width: none !important; min-height: 100dvh;
+  margin: 0 !important; border: 0 !important; border-radius: 0 !important;
+  box-shadow: none !important; overflow: visible;
+}
+.shell:not(.mobile) { align-items: flex-start; }
+.shell:not(.mobile) > .sidebar {
+  position: sticky; top: 0; width: 220px; height: 100dvh;
+  padding: 30px 20px; overflow-y: auto;
+}
+.shell:not(.mobile) > .main { padding: 32px 36px; }
+.shell.mobile > .main {
+  padding: max(22px, env(safe-area-inset-top)) 20px
+    calc(110px + env(safe-area-inset-bottom));
+}
+.mobile .bottom {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  padding: 10px max(8px, env(safe-area-inset-right))
+    calc(10px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+@media (max-width: 700px) {
+  .shell:not(.mobile) > .sidebar { width: 140px; padding: 22px 12px; }
+  .shell:not(.mobile) > .main { padding: 22px 18px; }
+}
+@media (max-width: 380px) {
+  .shell.mobile > .main { padding-left: 16px; padding-right: 16px; }
+}
+
+
+/* 首页使用紧凑排版，常见手机纵向视口无需滚动。 */
+.mobile:has(#content > .grid) > .main { padding-top:12px; padding-bottom:88px; }
+.mobile:has(#content > .grid) .top { margin-bottom:12px; }
+.mobile:has(#content > .grid) .top h1 { font-size:24px; margin-bottom:0; }
+.mobile:has(#content > .grid) .top .avatar { width:40px; height:40px; }
+.mobile:has(#content > .grid) #content > br { display:none; }
+.mobile:has(#content > .grid) #content > .grid { gap:8px; margin-bottom:10px; }
+.mobile:has(#content > .grid) #content > .grid > .metric { padding:10px 12px; font-size:14px; }
+.mobile:has(#content > .grid) .metric b { margin-top:2px; font-size:25px; line-height:1.3; }
+.mobile:has(#content > .grid) #content > button { padding:8px 12px; font-size:14px; }
+.mobile:has(#content > .grid) #content > .card { margin-top:10px!important; padding:12px; }
+.mobile:has(#content > .grid) #content > .card h2 { margin:0 0 6px; font-size:17px; }
+.mobile:has(#content > .grid) .employee-store-card { margin-bottom:10px; }
+.mobile:has(#content > .grid) .employee-store-card p { margin-top:5px; font-size:13px; }
+.mobile:has(#content > .grid) .employee-store-card p span { font-size:13px; line-height:1.5; }
+.mobile:has(#content > .grid) .employee-store-card-header b { font-size:16px; }
+.mobile:has(#content > .grid) .store-edit-button { padding:5px 8px; font-size:12px; }
+.mobile:has(#content > .grid) .row { padding:8px 0; font-size:14px; }
+.mobile:has(#content > .grid) .row input { margin:5px 8px 5px 0!important; }
+.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart { max-height:170px; }
+.mobile:has(#content > .grid) .boss-sales-trend .trend-total { font-size:25px; margin:4px 0; }
+.mobile:has(#content > .grid) .trend-total span { display:inline; margin-left:10px; font-size:12px; }
+.mobile:has(#content > .grid) .boss-sales-trend > .employee-trend-card { margin-bottom:4px; }
+.mobile:has(#content > .grid) .trend-card-heading h2 { margin:0; font-size:13px!important; }
+.mobile:has(#content > .grid) .trend-data summary { padding:3px 0; font-size:12px; }
+.mobile:has(#content > .grid) .boss-sales-trend + button { padding:6px 9px; font-size:13px; }
+.mobile:has(#content > .grid) .bottom { padding-top:6px; padding-bottom:calc(6px + env(safe-area-inset-bottom)); }
+.mobile:has(#content > .grid) .bottom button { padding-top:5px; padding-bottom:5px; }
+@media(max-height:760px){.mobile:has(#content > .grid) > .main{padding-top:8px;padding-bottom:76px}.mobile:has(#content > .grid) .top{margin-bottom:8px}.mobile:has(#content > .grid) #content > .grid > .metric{padding:7px 10px}.mobile:has(#content > .grid) #content > .card{padding:9px;margin-top:7px!important}.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart{max-height:112px}.mobile:has(#content > .grid) .boss-sales-trend .trend-total{font-size:22px;margin:0}.mobile:has(#content > .grid) .trend-card-heading{display:none}.mobile:has(#content > .grid) .employee-store-card p{margin-top:3px}.mobile:has(#content > .grid) .row{padding:4px 0}}
+
+/* ==== 2026-11-13 第二轮评审 ==== */
+/* 问候语为最大标题，页面名缩小 */
+.greeting-line { font-size: 30px; font-weight: 700; color: #24392d; letter-spacing: .5px; }
+.mobile .greeting-line { font-size: 26px; }
+.page-name { font-size: 13px; color: #83917d; margin-top: 2px; }
+
+/* 导航：首页绿、门店靛蓝、客户紫、知识库琥珀、商品青、我的玫瑰（选中态配色，悬停浅底） */
+.sidebar button { display: flex; align-items: center; gap: 10px; border-radius: 10px; padding: 10px 12px; }
+.sidebar button .nav-icon { width: 20px; height: 20px; }
+.sidebar button.active, .mobile .bottom button.active { background: var(--navc) !important; color: #fff !important; border-radius: 12px; }
+.sidebar button:hover:not(.active), .mobile .bottom button:hover:not(.active) { background: var(--navs); color: var(--navc); border-radius: 12px; }
+.sidebar button .nav-icon, .mobile .bottom button .nav-icon { color: var(--navc, #547c45); }
+.sidebar button.active .nav-icon, .mobile .bottom button.active .nav-icon { color: #fff; }
+
+.nav-0 { --navc: #5b8c3e; --navs: #edf3e5; }   /* 首页 · 青绿 */
+.nav-1 { --navc: #5566b8; --navs: #eceffa; }   /* 门店/顾客 · 靛蓝 */
+.nav-2 { --navc: #8a5fb0; --navs: #f3ecf9; }   /* 客户/知识 · 紫 */
+.nav-3 { --navc: #b4832e; --navs: #faf2e0; }   /* 知识库/微信 · 琥珀 */
+.nav-4 { --navc: #3f97a8; --navs: #e6f4f7; }   /* 商品/自动回复 · 青 */
+.nav-5 { --navc: #b75d74; --navs: #faedf1; }   /* 我的 · 玫瑰 */
+.nav-6 { --navc: #8a5fb0; --navs: #f3ecf9; }
+.nav-7 { --navc: #5b8c3e; --navs: #edf3e5; }
+
+/* 导航图标动画：点击时房子蹦跳、门店开合、小人摇摆、书本翻页 */
+@keyframes navBounce { 0% { transform: translateY(0) } 35% { transform: translateY(-7px) } 70% { transform: translateY(2px) } 100% { transform: translateY(0) } }
+@keyframes navWiggle { 0% { transform: rotate(0) } 30% { transform: rotate(-14deg) } 60% { transform: rotate(10deg) } 100% { transform: rotate(0) } }
+@keyframes navFlip { 0% { transform: rotateY(0) } 50% { transform: rotateY(-55deg) } 100% { transform: rotateY(0) } }
+.bottom button:active .nav-icon, .sidebar button:active .nav-icon { animation: navBounce .45s ease; }
+.bottom button.nav-1:active .nav-icon, .sidebar button.nav-1:active .nav-icon { animation: navWiggle .45s ease; }
+.bottom button.nav-2:active .nav-icon, .sidebar button.nav-2:active .nav-icon { animation: navWiggle .45s ease; }
+.bottom button.nav-3:active .nav-icon, .sidebar button.nav-3:active .nav-icon { animation: navFlip .5s ease; }
+.bottom button .nav-icon, .sidebar button .nav-icon { transition: transform .2s; transform-origin: center; transform-box: fill-box; }
+.bottom button:hover .nav-icon, .sidebar button:hover .nav-icon { transform: translateY(-2px); }
+
+/* 知识库条目按钮：编辑靛蓝、移除砖红，悬停各自加深 */
+.kb-entry-actions button { background: #eceffa; color: #5566b8; }
+.kb-entry-actions button:hover { background: #5566b8; color: #fff; }
+.kb-entry-actions button:last-child { background: #faedf1; color: #b75d74; }
+.kb-entry-actions button:last-child:hover { background: #b75d74; color: #fff; }
