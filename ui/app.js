@@ -175,7 +175,7 @@ function render() {
     )
     .join("");
   document.getElementById("app").innerHTML =
-    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="greeting-line">${c.boss ? greeting("老板") : greeting("小陈")}</div></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
+    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="greeting-line">${["首页","总览"].includes(page) ? (c.boss ? greeting("老板") : greeting("小陈")) : page}</div></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
 }
 function employeeCustomerPage() {
   return `<div class="customer-list-toolbar"><label class="customer-stage-filter"><span class="muted">顾客时期</span><select aria-label="顾客时期筛选" onchange="customerStage=this.value;updateEmployeeCustomers()"><option value="">全部时期</option>${["一段", "二段", "三段", "四段"].map((v) => `<option value="${v}" ${customerStage === v ? "selected" : ""}>${stageText(v)}</option>`).join("")}</select></label><button class="primary" onclick="edit('customers')">＋ 新建客户</button></div><p class="customer-result-count muted" id="employee-customer-count"></p><div class="employee-customer-list" id="employee-customer-list"></div>`;
@@ -306,12 +306,12 @@ function employeeBarChart(key, title, unit, rows = employeeWeeklyDemo) {
 let heroIndex = 0;
 let heroTimer = null;
 const heroSlides = [
-  { text: "每一次耐心解答，", sub: "都是宝妈安心的理由", bg: "linear-gradient(120deg,#8fbb6d,#6f9d4f)" },
-  { text: "记住每个宝宝，", sub: "让服务更有温度", bg: "linear-gradient(120deg,#7fa8d8,#5d82b8)" },
+  { text: "每一次耐心解答，", sub: "都是宝妈安心的理由", bg: "linear-gradient(120deg,#7fa8d8,#5d82b8)" },
+  { text: "记住每个宝宝，", sub: "让服务更有温度", bg: "linear-gradient(120deg,#a58fd0,#8467b3)" },
   { text: "今天也要元气满满，", sub: "把专业留给客户，把琐碎交给客序", bg: "linear-gradient(120deg,#d8a35c,#c08a3e)" },
 ];
 function mascotSvg() {
-  return `<svg viewBox="0 0 120 120" class="mascot" aria-hidden="true"><ellipse cx="60" cy="112" rx="30" ry="5" fill="#00000018"/><circle cx="60" cy="58" r="38" fill="#ffe9a8"/><circle cx="60" cy="58" r="38" fill="none" stroke="#f2cf6e" stroke-width="3"/><path d="M52 20 Q60 6 68 20" fill="none" stroke="#6f9d4f" stroke-width="4" stroke-linecap="round"/><ellipse cx="60" cy="16" rx="7" ry="4" fill="#8fbb6d" transform="rotate(-18 60 16)"/><circle cx="47" cy="55" r="4.5" fill="#3a2e22"/><circle cx="73" cy="55" r="4.5" fill="#3a2e22"/><circle cx="48.5" cy="53.5" r="1.5" fill="#fff"/><circle cx="74.5" cy="53.5" r="1.5" fill="#fff"/><ellipse cx="42" cy="66" rx="5" ry="3.5" fill="#ffb3a0" opacity=".75"/><ellipse cx="78" cy="66" rx="5" ry="3.5" fill="#ffb3a0" opacity=".75"/><path d="M52 72 Q60 79 68 72" fill="none" stroke="#3a2e22" stroke-width="3" stroke-linecap="round"/><path d="M24 62 Q14 58 16 50" fill="none" stroke="#ffe9a8" stroke-width="7" stroke-linecap="round"/><path d="M96 62 Q106 58 104 50" fill="none" stroke="#ffe9a8" stroke-width="7" stroke-linecap="round"/></svg>`;
+  return `<svg viewBox="0 0 120 120" class="mascot" aria-hidden="true"><ellipse cx="60" cy="114" rx="26" ry="4" fill="#00000014"/><path d="M34 108 Q34 78 60 78 Q86 78 86 108 Z" fill="#fff" opacity=".95"/><path d="M46 108 L46 88 Q60 96 74 88 L74 108 Z" fill="#f4f7fb"/><rect x="55" y="82" width="10" height="12" rx="3" fill="#f4f7fb"/><circle cx="60" cy="52" r="27" fill="#ffdfc4"/><path d="M31 50 Q31 22 60 22 Q89 22 89 50 L89 44 Q60 32 31 44 Z" fill="#4a7ba6"/><path d="M31 50 Q60 36 89 50 L89 44 Q60 30 31 44 Z" fill="#3d6a92"/><circle cx="50" cy="54" r="3.4" fill="#33302b"/><circle cx="70" cy="54" r="3.4" fill="#33302b"/><circle cx="51.2" cy="52.8" r="1.1" fill="#fff"/><circle cx="71.2" cy="52.8" r="1.1" fill="#fff"/><ellipse cx="44" cy="62" rx="4.5" ry="3" fill="#ffb3a0" opacity=".7"/><ellipse cx="76" cy="62" rx="4.5" ry="3" fill="#ffb3a0" opacity=".7"/><path d="M53 66 Q60 72 67 66" fill="none" stroke="#33302b" stroke-width="2.6" stroke-linecap="round"/><path d="M30 84 Q20 78 22 68" fill="none" stroke="#ffdfc4" stroke-width="7" stroke-linecap="round"/><path d="M90 84 Q100 78 98 68" fill="none" stroke="#ffdfc4" stroke-width="7" stroke-linecap="round"/><circle cx="60" cy="97" r="4" fill="#4a7ba6"/></svg>`;
 }
 function heroBanner() {
   if (heroTimer === null) {
@@ -337,15 +337,15 @@ function metrics() {
   return `<div class="grid">${(configs[role].boss
     ? [
         ["客户总数", "2,460"],
-        ["今日新增", "12"],
+        ["今日新增客户", "12"],
         ["门店数量", "3"],
         ["今日销售额", "¥ 8,640"],
       ]
     : [
         ["我的客户", "128"],
         ["今日要做的事", data.tasks.filter((t) => !t.done).length],
+        ["今日销售额", "¥ 3,840"],
         ["本月销售额", "¥ 12,860"],
-        ["本月服务", "36"],
       ]
   )
     .map((x) => `<div class="card metric">${x[0]}<b>${x[1]}</b></div>`)
@@ -377,7 +377,7 @@ function content() {
     return `<div class="card"><h2>微信数据${c.boss ? "导出" : "导入"}</h2><p>${c.boss ? "按门店与日期选择，导出客户经营数据。" : "选择聊天文件，整理到客户档案。"}</p><input type="date" value="2026-11-13">${c.boss ? '<button class="primary" onclick="download()">导出示例 CSV</button>' : '<input type="file" onchange="toast(&quot;已选择文件，原型不读取或上传文件内容&quot;)">'}</div>`;
   if (page === "自动回复")
     return `<div class="card"><h2>自动回复设置</h2><label><input style="width:auto" type="checkbox" ${data.auto ? "checked" : ""} onchange="data.auto=this.checked;save();toast('设置已保存到原型')"> 启用自动回复</label><p>遇到超出知识库的问题，转交销售人工处理。</p><textarea id="reply" placeholder="输入欢迎语">${esc(data.reply || "你好，欢迎来到青禾母婴，请问有什么可以帮你？")}</textarea><button class="primary" onclick="data.reply=document.getElementById('reply').value;save();toast('欢迎语已保存')">保存</button></div>`;
-  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div>${!c.boss ? `<h2>我的门店</h2><p class="muted">${esc(employeeStore().name)}<br>${esc(employeeStore().address)} · ${esc(employeeStore().phone)}</p><button class="primary" onclick="editEmployeeStore()">编辑门店信息</button>` : ""}<h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
+  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div>${!c.boss ? `<h2>我的门店</h2><p class="muted">${esc(employeeStore().name)}<br>${esc(employeeStore().address)} · ${esc(employeeStore().phone)}</p><button class="primary" onclick="editEmployeeStore()">编辑门店信息</button>` : ""}<h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><h2 style="margin-top:22px">AI 模型配置</h2><label class="ai-field">服务商<select id="ai-provider" onchange="const p={DeepSeek:['https://api.deepseek.com','deepseek-chat'],通义千问:['https://dashscope.aliyuncs.com/compatible-mode/v1','qwen-plus']}[this.value];if(p){document.getElementById('ai-baseurl').value=p[0];document.getElementById('ai-model').value=p[1]}"><option>DeepSeek</option><option>通义千问</option><option>自定义兼容接口</option></select></label><label class="ai-field">API 地址<input id="ai-baseurl" placeholder="https://api.deepseek.com" value="${esc(data.aiBaseUrl || "https://api.deepseek.com")}"></label><label class="ai-field">模型名称<input id="ai-model" placeholder="deepseek-chat" value="${esc(data.aiModel || "deepseek-chat")}"></label><label class="ai-field">API Key<input id="ai-key" type="password" placeholder="输入你的 API Key，仅保存在本浏览器" value="${esc(data.aiKey || "")}"></label><label class="ai-field">表达灵活度 <span class="muted" id="ai-temp-label">${data.aiTemp ?? 0.3}</span><input id="ai-temp" type="range" min="0" max="2" step="0.1" value="${data.aiTemp ?? 0.3}" oninput="document.getElementById('ai-temp-label').textContent=this.value" style="width:100%"></label><button class="primary" onclick="data.aiBaseUrl=document.getElementById('ai-baseurl').value;data.aiModel=document.getElementById('ai-model').value;data.aiKey=document.getElementById('ai-key').value;data.aiTemp=Number(document.getElementById('ai-temp').value);save();toast('AI 配置已保存到本浏览器')">保存 AI 配置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
 }
 function knowledgeWebPage() {
   const left = ["产品", "服务", "专业", "其他"]

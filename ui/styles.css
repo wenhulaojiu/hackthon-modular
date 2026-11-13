@@ -42,9 +42,9 @@ header small {
 }
 .active,
 .primary {
-  background: #547c45 !important;
+  background: #4a7ba6 !important;
   color: white !important;
-  border-color: #547c45;
+  border-color: #4a7ba6;
 }
 #roles {
   display: flex;
@@ -139,7 +139,7 @@ p {
   display: block;
   font-size: 30px;
   margin-top: 10px;
-  color: #557b46;
+  color: #4a7ba6;
 }
 .wide {
   grid-column: 1/-1;
@@ -228,20 +228,20 @@ textarea {
   padding-top: 20px;
 }
 .chart div {
-  background: #83a66c;
+  background: #7aa8cc;
   flex: 1;
   border-radius: 8px 8px 0 0;
   min-height: 25px;
 }
 .chart div:hover {
-  background: #547c45;
+  background: #4a7ba6;
 }
 .customer {
   cursor: pointer;
   background: #fbfcf9;
 }
 .customer:hover {
-  border-color: #83a66c;
+  border-color: #7aa8cc;
 }
 .tabs {
   display: flex;
@@ -681,7 +681,7 @@ dialog .row > span:last-child {
   background: #e6eedf;
 }
 .modal-close-button:focus-visible {
-  outline: 2px solid #547c45;
+  outline: 2px solid #4a7ba6;
   outline-offset: 2px;
 }
 .knowledge-categories {
@@ -770,7 +770,7 @@ dialog .row > span:last-child {
 }
 .trend-total {
   font-size: 31px;
-  color: #547c45;
+  color: #4a7ba6;
   font-weight: bold;
   margin: 15px 0 5px;
 }
@@ -884,17 +884,17 @@ button, input, textarea, select { font-size: 15px; }
 .campaign-store { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #f5f8f0; border: 1px solid #dce5d8; border-radius: 12px; padding: 14px 16px; cursor: pointer; transition: background .15s, border-color .15s; }
 .campaign-store.checked { background: #e9f3dd; border-color: #9cbf6f; }
 .campaign-store-name { font-weight: 600; font-size: 16px; }
-.campaign-check, .todo-check { appearance: none; -webkit-appearance: none; width: 28px; height: 28px; margin: 0; border: 2px solid #b9cbaa; border-radius: 8px; background: #fff; cursor: pointer; flex-shrink: 0; display: inline-grid; place-items: center; transition: background .15s, border-color .15s; }
-.campaign-check::after, .todo-check::after { content: ""; width: 15px; height: 8px; border-left: 3px solid #fff; border-bottom: 3px solid #fff; transform: rotate(-45deg) scale(.6); opacity: 0; transition: opacity .12s, transform .12s; margin-top: -3px; }
+.campaign-check, .todo-check { appearance: none; -webkit-appearance: none; width: 28px; height: 28px; margin: 0; border: 2px solid #b9cbaa; border-radius: 8px; background: #fff; cursor: pointer; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; transition: background .15s, border-color .15s; }
+.campaign-check::after, .todo-check::after { content: ""; display: block; width: 13px; height: 7px; border-left: 3px solid #fff; border-bottom: 3px solid #fff; transform: rotate(-45deg); opacity: 0; margin-top: -4px; transition: opacity .12s; }
 .campaign-check:checked, .todo-check:checked { background: #7b9e29; border-color: #7b9e29; }
-.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; transform: rotate(-45deg) scale(1); }
+.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; }
 .todo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 6px; border-bottom: 1px solid #e7ede2; cursor: pointer; }
 .todo-row:last-child { border-bottom: 0; }
 .todo-text { flex: 1; font-size: 15px; }
 .todo-row.checked .todo-text { color: #8a967f; text-decoration: line-through; }
 
 /* 返回上一级链接 */
-.back-link { display: inline-flex; margin-bottom: 12px; background: transparent; border: 0; color: #557b46; font-weight: 600; padding: 4px 0; }
+.back-link { display: inline-flex; margin-bottom: 12px; background: transparent; border: 0; color: #4a7ba6; font-weight: 600; padding: 4px 0; }
 .back-link:hover { background: transparent; color: #7b9e29; }
 
 /* 员工小程序：顾客横条带偏好摘要 */
@@ -916,7 +916,7 @@ button, input, textarea, select { font-size: 15px; }
 .kb-column-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .kb-column-head h2 { margin: 0; }
 .kb-column input { margin: 12px 0; }
-.kb-group-title { margin: 18px 0 8px; font-size: 15px; color: #557b46; }
+.kb-group-title { margin: 18px 0 8px; font-size: 15px; color: #4a7ba6; }
 .kb-entry { border: 1px solid #e1e9da; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: #fafcf7; }
 .kb-entry:hover { border-color: #b9d29e; }
 .kb-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -1005,7 +1005,7 @@ body { margin: 0; min-height: 100dvh; }
 .sidebar button .nav-icon { width: 20px; height: 20px; }
 .sidebar button.active, .mobile .bottom button.active { background: var(--navc) !important; color: #fff !important; border-radius: 12px; }
 .sidebar button:hover:not(.active), .mobile .bottom button:hover:not(.active) { background: var(--navs); color: var(--navc); border-radius: 12px; }
-.sidebar button .nav-icon, .mobile .bottom button .nav-icon { color: var(--navc, #547c45); }
+.sidebar button .nav-icon, .mobile .bottom button .nav-icon { color: var(--navc, #4a7ba6); }
 .sidebar button.active .nav-icon, .mobile .bottom button.active .nav-icon { color: #fff; }
 
 .nav-0 { --navc: #5b8c3e; --navs: #edf3e5; }   /* 首页 · 青绿 */
@@ -1082,3 +1082,11 @@ body { margin: 0; min-height: 100dvh; }
 .mobile .mascot { width: 80px; height: 80px; }
 @keyframes heroIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes mascotFloat { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-7px) rotate(3deg); } }
+
+/* 次级配色柔化：背景与边框带一点蓝灰 */
+body { background: #eef1f6; }
+.card { border-color: #dde3ec; }
+.metric { background: #eef3f9; }
+.store-card { background: #eaf1f8; border-color: #d3e0ee; }
+.ai-field { display: block; margin-top: 12px; font-size: 14px; color: #4a5568; }
+.ai-field input, .ai-field select { margin-top: 6px; }
