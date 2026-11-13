@@ -885,9 +885,9 @@ button, input, textarea, select { font-size: 15px; }
 .campaign-store.checked { background: #e9f3dd; border-color: #9cbf6f; }
 .campaign-store-name { font-weight: 600; font-size: 16px; }
 .campaign-check, .todo-check { appearance: none; -webkit-appearance: none; width: 28px; height: 28px; margin: 0; border: 2px solid #b9cbaa; border-radius: 8px; background: #fff; cursor: pointer; flex-shrink: 0; display: inline-grid; place-items: center; transition: background .15s, border-color .15s; }
-.campaign-check::after, .todo-check::after { content: "✓"; font-size: 18px; font-weight: 700; color: #fff; opacity: 0; transform: scale(.6); transition: opacity .12s, transform .12s; }
+.campaign-check::after, .todo-check::after { content: ""; width: 15px; height: 8px; border-left: 3px solid #fff; border-bottom: 3px solid #fff; transform: rotate(-45deg) scale(.6); opacity: 0; transition: opacity .12s, transform .12s; margin-top: -3px; }
 .campaign-check:checked, .todo-check:checked { background: #7b9e29; border-color: #7b9e29; }
-.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; transform: scale(1); }
+.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; transform: rotate(-45deg) scale(1); }
 .todo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 6px; border-bottom: 1px solid #e7ede2; cursor: pointer; }
 .todo-row:last-child { border-bottom: 0; }
 .todo-text { flex: 1; font-size: 15px; }
@@ -1063,3 +1063,22 @@ body { margin: 0; min-height: 100dvh; }
 .todo-text { order: -1; font-size: 17px; line-height: 1.65; }
 .todo-check { order: 2; width: 30px; height: 30px; }
 .todo-row.checked .todo-text { font-size: 16px; }
+
+/* 问候语再放大 */
+.greeting-line { font-size: 36px; font-weight: 750; }
+.mobile .greeting-line { font-size: 32px; }
+
+/* 首页轮播横幅 */
+.hero-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-radius: 20px; padding: 22px 26px; margin-bottom: 18px; color: #fff; min-height: 118px; transition: background 1s; overflow: hidden; }
+.hero-text { animation: heroIn .7s ease; }
+.hero-line { font-size: 24px; font-weight: 700; letter-spacing: 1px; line-height: 1.5; }
+.hero-sub { font-size: 15px; opacity: .92; margin-top: 6px; }
+.hero-dots { display: flex; gap: 6px; margin-top: 14px; }
+.hero-dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff55; transition: background .3s, width .3s; }
+.hero-dot.on { background: #fff; width: 18px; border-radius: 4px; }
+.mascot { width: 96px; height: 96px; flex-shrink: 0; animation: mascotFloat 3s ease-in-out infinite; }
+.mobile .hero-banner { padding: 18px 20px; min-height: 108px; }
+.mobile .hero-line { font-size: 20px; }
+.mobile .mascot { width: 80px; height: 80px; }
+@keyframes heroIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes mascotFloat { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-7px) rotate(3deg); } }
