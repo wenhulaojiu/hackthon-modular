@@ -311,7 +311,7 @@ function metrics() {
       ]
     : [
         ["我的客户", "128"],
-        ["今日待办", data.tasks.filter((t) => !t.done).length],
+        ["今日要做的事", data.tasks.filter((t) => !t.done).length],
         ["本月销售额", "¥ 12,860"],
         ["本月服务", "36"],
       ]
@@ -321,8 +321,10 @@ function metrics() {
 }
 function tasks() {
   return data.tasks
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => Number(a.t.done) - Number(b.t.done))
     .map(
-      (t, i) =>
+      ({ t, i }) =>
         `<label class="todo-row ${t.done ? "checked" : ""}"><input class="todo-check" type="checkbox" ${t.done ? "checked" : ""} onchange="data.tasks[${i}].done=this.checked;save();render()"><span class="todo-text">${esc(t.text)}</span></label>`,
     )
     .join("");
@@ -330,7 +332,7 @@ function tasks() {
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日待办"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
+    return `${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))

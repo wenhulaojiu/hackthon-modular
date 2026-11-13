@@ -1042,6 +1042,36 @@ body { margin: 0; min-height: 100dvh; }
 .kb-entry-actions button:last-child { background: #faedf1; color: #b75d74; }
 .kb-entry-actions button:last-child:hover { background: #b75d74; color: #fff; }
 
+/* ==== 2026-11-13 第三轮：恢复手机形态 + 待办优化 ==== */
+/* 小程序恢复手机宽度：居中、圆角、投影；真实手机上全宽 */
+.shell.mobile {
+  width: 420px !important;
+  max-width: 420px !important;
+  min-height: 100dvh;
+  margin: 0 auto !important;
+  border-left: 1px solid #e4e9df !important;
+  border-right: 1px solid #e4e9df !important;
+  box-shadow: 0 0 40px #324c2712 !important;
+  position: relative;
+}
+.mobile .bottom {
+  position: fixed;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%);
+  width: 420px;
+  max-width: 100vw;
+}
+@media (max-width: 440px) {
+  .shell.mobile { width: 100% !important; max-width: 100% !important; border: 0 !important; box-shadow: none !important; }
+  .mobile .bottom { width: 100%; }
+}
+/* 待办：勾选框固定右侧、文字放大 */
+.todo-row { flex-direction: row; }
+.todo-text { order: -1; font-size: 17px; line-height: 1.65; }
+.todo-check { order: 2; width: 30px; height: 30px; }
+.todo-row.checked .todo-text { font-size: 16px; }
+
 #roles, body > header, body > .hint { display:none!important; }
 </style>
 </head>
@@ -1368,7 +1398,7 @@ function metrics() {
       ]
     : [
         ["我的客户", "128"],
-        ["今日待办", data.tasks.filter((t) => !t.done).length],
+        ["今日要做的事", data.tasks.filter((t) => !t.done).length],
         ["本月销售额", "¥ 12,860"],
         ["本月服务", "36"],
       ]
@@ -1378,8 +1408,10 @@ function metrics() {
 }
 function tasks() {
   return data.tasks
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => Number(a.t.done) - Number(b.t.done))
     .map(
-      (t, i) =>
+      ({ t, i }) =>
         `<label class="todo-row ${t.done ? "checked" : ""}"><input class="todo-check" type="checkbox" ${t.done ? "checked" : ""} onchange="data.tasks[${i}].done=this.checked;save();render()"><span class="todo-text">${esc(t.text)}</span></label>`,
     )
     .join("");
@@ -1387,7 +1419,7 @@ function tasks() {
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日待办"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
+    return `${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))
