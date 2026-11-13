@@ -1090,3 +1090,44 @@ body { background: #eef1f6; }
 .store-card { background: #eaf1f8; border-color: #d3e0ee; }
 .ai-field { display: block; margin-top: 12px; font-size: 14px; color: #4a5568; }
 .ai-field input, .ai-field select { margin-top: 6px; }
+
+/* ==== 2026-11-14 第四轮 ==== */
+/* 勾选框换方案：实心圆点，不用对勾 */
+.campaign-check, .todo-check { border-radius: 50%; border: 2px solid #b6c4d4; }
+.campaign-check::after, .todo-check::after { content: ""; width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; transform: none; margin: 0; opacity: 0; transition: opacity .12s; }
+.campaign-check:checked, .todo-check:checked { background: #4a7ba6; border-color: #4a7ba6; }
+.campaign-check:checked::after, .todo-check:checked::after { opacity: 1; }
+
+/* 待办文字再放大 */
+.todo-text { font-size: 18px; line-height: 1.7; }
+.todo-row { padding: 15px 6px; }
+
+/* 客户卡片 v2 */
+.customer-card-v2 { display: flex; flex-direction: column; gap: 10px; }
+.cc-head { display: flex; gap: 12px; align-items: flex-start; }
+.cc-avatar { border: 1.5px solid #cdd9e6; width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: #eaf1f8; color: #4a7ba6; font-weight: 600; font-size: 17px; flex-shrink: 0; }
+.cc-id { flex: 1; min-width: 0; }
+.cc-name { font-size: 18px; color: #2f3b4c; }
+.cc-contact { font-size: 13px; color: #7b8794; margin-top: 3px; line-height: 1.7; }
+.cc-baby { font-size: 17px; font-weight: 700; color: #8467b3; }
+.cc-stage { margin-left: 8px; font-size: 14px; font-weight: 600; color: #4a7ba6; background: #eaf1f8; border-radius: 6px; padding: 2px 8px; }
+.cc-note { margin: 0; font-size: 15px; color: #55606e; line-height: 1.7; }
+.cc-store { font-size: 14px; color: #7b8794; }
+.cc-store b { color: #2f3b4c; }
+.cc-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin-top: auto; }
+.cc-time { font-size: 12px; color: #9aa4b0; line-height: 1.7; }
+.cc-more { font-size: 14px; color: #4a7ba6; font-weight: 600; white-space: nowrap; }
+
+/* 时期分类卡：统一青蓝系，不再绿 */
+.stage-card { text-align: left; background: #eef3f9; border: 1px solid #dde3ec; }
+.stage-card-title { font-size: 16px; font-weight: 700; color: #4a7ba6; }
+.stage-card-count { display: block; font-size: 28px; margin: 12px 0; color: #2f3b4c; }
+.stage-card-more { font-size: 13px; color: #7b8794; }
+.stage-card.primary { background: #4a7ba6 !important; }
+.stage-card.primary .stage-card-title, .stage-card.primary .stage-card-count, .stage-card.primary .stage-card-more { color: #fff; }
+
+/* 微信连接状态 */
+.wechat-live { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.wechat-live h2 { margin: 0; }
+.live-dot { width: 10px; height: 10px; border-radius: 50%; background: #4a7ba6; box-shadow: 0 0 0 4px #4a7ba620; animation: livePulse 2s infinite; }
+@keyframes livePulse { 0%,100% { box-shadow: 0 0 0 3px #4a7ba620; } 50% { box-shadow: 0 0 0 7px #4a7ba610; } }
