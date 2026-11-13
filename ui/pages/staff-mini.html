@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>客序 · 员工小程序</title>
   <!-- 单文件原型：样式与交互均已内嵌，可复制本文件单独打开。 -->
   <style>
@@ -874,6 +874,39 @@ dialog .row > span:last-child {
 }
 
 #roles { display: none; }
+
+/* 实际设备布局：去掉演示外壳和模拟设备边框，页面铺满浏览器。 */
+html, body { min-height: 100%; background: #fff; }
+body { margin: 0; min-height: 100dvh; }
+body > header, body > .hint { display: none !important; }
+.shell, .shell.mobile {
+  width: 100%; max-width: none !important; min-height: 100dvh;
+  margin: 0 !important; border: 0 !important; border-radius: 0 !important;
+  box-shadow: none !important; overflow: visible;
+}
+.shell:not(.mobile) { align-items: flex-start; }
+.shell:not(.mobile) > .sidebar {
+  position: sticky; top: 0; width: 220px; height: 100dvh;
+  padding: 30px 20px; overflow-y: auto;
+}
+.shell:not(.mobile) > .main { padding: 32px 36px; }
+.shell.mobile > .main {
+  padding: max(22px, env(safe-area-inset-top)) 20px
+    calc(110px + env(safe-area-inset-bottom));
+}
+.mobile .bottom {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  padding: 10px max(8px, env(safe-area-inset-right))
+    calc(10px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+@media (max-width: 700px) {
+  .shell:not(.mobile) > .sidebar { width: 140px; padding: 22px 12px; }
+  .shell:not(.mobile) > .main { padding: 22px 18px; }
+}
+@media (max-width: 380px) {
+  .shell.mobile > .main { padding-left: 16px; padding-right: 16px; }
+}
+
   </style>
 </head>
 <body>
@@ -1712,3 +1745,4 @@ render();
   </script>
 </body>
 </html>
+
