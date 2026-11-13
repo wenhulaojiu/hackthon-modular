@@ -202,3 +202,33 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--kexu-focus); ou
 .app-shell > .sidebar > .brand{margin-bottom:30px}
 .app-shell > .workspace > .main-content{min-height:100vh}
 @media(max-width:720px){.main-content > .page-heading .heading-actions{margin-left:auto}.main-content > .page-heading .mobile-menu{display:inline-flex}}
+
+/* 提升卡片与背景的区分度：背景加深为灰绿，卡片带柔和投影，不再只靠一条描边 */
+:root {
+  --background: #e9efe8;
+  --kexu-panel: #f2f6f1;
+  --kexu-line: #d8e2d6;
+}
+.card, .stat-card, .modal, .knowledge-panel, .local-wechat-panel {
+  box-shadow: 0 1px 3px #14261a0f, 0 4px 14px #14261a09;
+}
+.card:hover, .stat-card.clickable:hover {
+  border-color: #c7d6c5;
+}
+
+/* 总览页「新活动」入口的绿色加号按钮 */
+.campaign-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #7b9e29;
+  color: #fff;
+  border-radius: 9px;
+  padding: 8px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 3px 8px #42570f2e;
+  transition: background .16s, transform .16s;
+  flex-shrink: 0;
+}
+.campaign-entry:hover .campaign-add { background: #8fb536; transform: translateY(-1px); }

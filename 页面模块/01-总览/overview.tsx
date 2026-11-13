@@ -1,6 +1,6 @@
 'use client';
 import {useId,useState} from 'react';
-import {ArrowUpRight,CalendarDays,Megaphone,TrendingUp,UserRound,Users,Wallet} from 'lucide-react';
+import {ArrowUpRight,CalendarDays,Megaphone,Plus,TrendingUp,UserRound,Users,Wallet} from 'lucide-react';
 import {currency,overviewStats} from '../../lib/domain';
 import type {PageId,SharedProps} from '../../lib/types';
 import {day,humanDate} from '../09-公共工具与样式/ui';
@@ -19,7 +19,7 @@ export default function Overview({state,go}:SharedProps&{go:(id:PageId,customer?
  const recentOrders=state.orders.filter(order=>order.status==='confirmed').sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,5);
  return <><button type="button" className="card campaign-entry" onClick={()=>go('campaign')} style={{display:'flex',width:'100%',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',marginBottom:16,cursor:'pointer',textAlign:'left'}}>
   <span style={{display:'flex',alignItems:'center',gap:12}}><span className="stat-icon green" aria-hidden="true"><Megaphone size={19} strokeWidth={1.7}/></span><span><strong style={{fontSize:15}}>新活动</strong><span className="muted small" style={{display:'block'}}>创建活动，按客户偏好圈选，一键推送到微信</span></span></span>
-  <ArrowUpRight size={18} aria-hidden="true"/>
+  <span className="campaign-add"><Plus size={15} strokeWidth={2.4}/>添加</span>
  </button>
  <div className="stats-grid"><Stat label="客户总数" value={state.customers.length.toString()} unit="位" icon={Users} color="green"/><Stat label={`近 ${range} 天新增客户`} value={stats.newCustomers.toString()} unit="位" icon={TrendingUp} color="green"/><Stat label="今日净营业额" value={currency(stats.todayRevenue).replace(/[¥￥]/g,'')} unit="元" icon={Wallet} color="amber"/><Stat label="今日待跟进" value={stats.dueTasks.toString()} unit="项" icon={CalendarDays} color="blue" action={()=>go('marketing')}/></div>
  <div className="overview-middle"><section className="card trend-card"><div className="card-heading"><div><h2>经营趋势</h2><p>{metric==='revenue'?'已确认消费减去退款后的净收入':'按首次建档日期统计的新增客户'}</p></div><div className="range-toggle"><button className={range===7?'active':''} onClick={()=>setRange(7)}>近7天</button><button className={range===30?'active':''} onClick={()=>setRange(30)}>近30天</button></div></div><div className="chart-summary"><strong>{metric==='revenue'?currency(stats.netRevenue):stats.newCustomers}<small>{metric==='revenue'?'区间净营业额':'区间新增客户'}</small></strong><div className="chart-legend"><button className={metric==='revenue'?'active':''} onClick={()=>setMetric('revenue')}><i/>营业额</button><button className={metric==='customers'?'active':''} onClick={()=>setMetric('customers')}><i/>新增客户</button></div></div><div className="chart-area">
