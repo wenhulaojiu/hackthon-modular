@@ -13,6 +13,7 @@ import AutoReply from '../页面模块/05-自动回复/auto-reply';
 import Products from '../页面模块/06-商品与服务/products';
 import DataExport from '../页面模块/08-数据导出/data-export';
 import KnowledgeBase from '../页面模块/10-知识库/knowledge-base';
+import Campaign from '../页面模块/11-新活动/campaign';
 import {assertWorkspaceCurrent,captureWorkspace,getWorkspaceInvalidation,registerWorkspaceController,setWorkspaceToken,subscribeWorkspaceInvalidation,workspaceFetch,type WorkspaceSnapshot} from '../lib/client-workspace';
 import {mergeRuntimeEdit,mergeRuntimeRefresh} from '../lib/runtime-state-refresh';
 
@@ -86,8 +87,8 @@ export default function MerchantApp({displayName}:{displayName:string}){
     <nav>{nav.map(n=><button key={n.id} className={'nav-item '+(page===n.id?'active':'')} onClick={()=>go(n.id)}><n.icon size={19}/><span>{n.text}</span>{n.id==='marketing'&&dueCount>0&&<span className="nav-count">{dueCount}</span>}</button>)}</nav>
     </aside>
     <div className="workspace">
-    <main className="main-content"><div className="page-heading"><div><h1>{page==='overview'?'总览':nav.find(n=>n.id===page)?.text}</h1></div><div className="heading-actions"><button className="icon-button mobile-menu" onClick={()=>setMobileNav(true)} aria-label="展开菜单"><Menu size={20}/></button>{saveStatus==='保存失败'&&<span className="save-label error" role="alert">保存失败</span>}</div></div>
+    <main className="main-content"><div className="page-heading"><div><h1>{page==='overview'?'总览':page==='campaign'?'新活动':nav.find(n=>n.id===page)?.text}</h1></div><div className="heading-actions"><button className="icon-button mobile-menu" onClick={()=>setMobileNav(true)} aria-label="展开菜单"><Menu size={20}/></button>{saveStatus==='保存失败'&&<span className="save-label error" role="alert">保存失败</span>}</div></div>
     {workspaceError&&<div className="workspace-changed-banner" role="alert"><div><strong>请重新加载微信数据工作空间</strong><p>{workspaceError}</p></div><button className="btn primary" onClick={()=>window.location.reload()}>刷新工作空间</button></div>}
-    <div inert={!!workspaceError}>{page==='overview'&&<Overview {...props} go={go}/>} {page==='customers'&&<Customers {...props} selectedId={selectedId} onSelect={setSelectedId}/>} {page==='marketing'&&<Marketing {...props} go={go}/>} {page==='inbox'&&<Inbox {...props} go={go} onExport={()=>setExportOpen(true)}/>} {page==='auto-reply'&&<AutoReply {...props}/>} {page==='products'&&<Products {...props}/>} {page==='knowledge'&&<KnowledgeBase {...props}/>} {page==='settings'&&<Settings {...props} hasApiKey={hasApiKey} onSaveKey={onSaveKey} onExport={()=>setExportOpen(true)}/>}</div>
+    <div inert={!!workspaceError}>{page==='overview'&&<Overview {...props} go={go}/>} {page==='customers'&&<Customers {...props} selectedId={selectedId} onSelect={setSelectedId}/>} {page==='marketing'&&<Marketing {...props} go={go}/>} {page==='inbox'&&<Inbox {...props} go={go} onExport={()=>setExportOpen(true)}/>} {page==='auto-reply'&&<AutoReply {...props}/>} {page==='products'&&<Products {...props}/>} {page==='knowledge'&&<KnowledgeBase {...props}/>} {page==='campaign'&&<Campaign {...props} go={go}/>} {page==='settings'&&<Settings {...props} hasApiKey={hasApiKey} onSaveKey={onSaveKey} onExport={()=>setExportOpen(true)}/>}</div>
     </main></div><DataExport state={state} open={exportOpen} onClose={()=>setExportOpen(false)} notify={notify} prepareState={prepareExportState} onExported={recordExport}/>{toast&&<div className={'toast '+(toast.error?'error':'')} role="status">{toast.error?<CircleHelp size={18}/>:<CheckCircle2 size={18}/>}<span>{toast.text}</span><button onClick={()=>setToast(null)} aria-label="关闭通知"><X size={15}/></button></div>}</div>;
 }

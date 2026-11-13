@@ -29,6 +29,12 @@ function PanelBody({ state, notify, onSave, standalone }: Props) {
   const [saving, setSaving] = useState(false);
   const [sample, setSample] = useState('DHA和鱼油有什么区别');
   const [preview, setPreview] = useState<{ intent: string; result: ReplyResult | null } | null>(null);
+  const [query, setQuery] = useState('');
+
+  const keyword = query.trim().toLowerCase();
+  const visibleTopics = draft.topics
+    .map((topic, index) => ({ topic, index }))
+    .filter(({ topic }) => !keyword || `${topic.title}\n${topic.answer}`.toLowerCase().includes(keyword));
 
   const updateTopic = (index: number, patch: Partial<GuideTopic>) => setDraft({ ...draft, topics: draft.topics.map((topic, current) => current === index ? { ...topic, ...patch } : topic) });
   const addTopic = () => setDraft({ ...draft, topics: [...draft.topics, { id: crypto.randomUUID(), title: '', keywords: [], answer: '', enabled: true }] });
@@ -77,11 +83,16 @@ function PanelBody({ state, notify, onSave, standalone }: Props) {
           notify(`识别到 ${topics.length} 个段落，检查后保存`);
         }} />
       </div>
-      {draft.topics.map((topic, index) => <div key={topic.id} style={{ padding: '14px 0', borderTop: index ? '1px solid #f1f3f6' : 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 8px' }}>
+        <input className="input" type="search" style={{ maxWidth: 260 }} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索段落标题或正文…" aria-label="搜索知识库段落" />
+        {keyword && <span className="muted small">匹配 {visibleTopics.length} / {draft.topics.length} 段</span>}
+      </div>
+      {visibleTopics.map(({ topic, index }) => <div key={topic.id} style={{ padding: '14px 0', borderTop: '1px solid #f1f3f6' }}>
         <input className="input" aria-label={`第 ${index + 1} 段标题`} maxLength={200} value={topic.title} onChange={event => updateTopic(index, { title: event.target.value })} placeholder="段落标题" style={TITLE_STYLE} />
         <textarea className="input" aria-label={`第 ${index + 1} 段正文`} rows={Math.max(4, topic.answer.split('\n').length + 2)} maxLength={4000} value={topic.answer} onChange={event => updateTopic(index, { answer: event.target.value })} placeholder="在这里写正文…" style={BODY_STYLE} />
         <div style={{ textAlign: 'right' }}><button className="text-button danger-text" type="button" onClick={() => removeTopic(index)}>移除</button></div>
       </div>)}
+      {keyword && !visibleTopics.length && <p className="muted small">没有匹配的段落。</p>}
     </div>
     <div className="button-row" style={{ marginTop: 12 }}><button className="btn secondary sm" type="button" disabled={draft.topics.length >= 50} onClick={addTopic}>新增段落</button></div>
     <div className="modal-actions" style={{ marginTop: 12 }}><button className="btn primary" type="button" disabled={saving} onClick={() => { void save(); }}>{saving ? '保存中…' : '保存'}</button></div>
