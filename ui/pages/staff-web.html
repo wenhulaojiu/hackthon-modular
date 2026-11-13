@@ -873,12 +873,12 @@ dialog .row > span:last-child {
   color: #7b8974;
 }
 
-#roles { display: none; }
+
 
 /* 实际设备布局：去掉演示外壳和模拟设备边框，页面铺满浏览器。 */
 html, body { min-height: 100%; background: #fff; }
 body { margin: 0; min-height: 100dvh; }
-body > header, body > .hint { display: none !important; }
+
 .shell, .shell.mobile {
   width: 100%; max-width: none !important; min-height: 100dvh;
   margin: 0 !important; border: 0 !important; border-radius: 0 !important;
@@ -907,7 +907,39 @@ body > header, body > .hint { display: none !important; }
   .shell.mobile > .main { padding-left: 16px; padding-right: 16px; }
 }
 
-  </style>
+
+/* 首页使用紧凑排版，常见手机纵向视口无需滚动。 */
+.mobile:has(#content > .grid) > .main { padding-top:12px; padding-bottom:88px; }
+.mobile:has(#content > .grid) .top { margin-bottom:12px; }
+.mobile:has(#content > .grid) .top h1 { font-size:24px; margin-bottom:0; }
+.mobile:has(#content > .grid) .top .avatar { width:40px; height:40px; }
+.mobile:has(#content > .grid) #content > br { display:none; }
+.mobile:has(#content > .grid) #content > .grid { gap:8px; margin-bottom:10px; }
+.mobile:has(#content > .grid) #content > .grid > .metric { padding:10px 12px; font-size:14px; }
+.mobile:has(#content > .grid) .metric b { margin-top:2px; font-size:25px; line-height:1.3; }
+.mobile:has(#content > .grid) #content > button { padding:8px 12px; font-size:14px; }
+.mobile:has(#content > .grid) #content > .card { margin-top:10px!important; padding:12px; }
+.mobile:has(#content > .grid) #content > .card h2 { margin:0 0 6px; font-size:17px; }
+.mobile:has(#content > .grid) .employee-store-card { margin-bottom:10px; }
+.mobile:has(#content > .grid) .employee-store-card p { margin-top:5px; font-size:13px; }
+.mobile:has(#content > .grid) .employee-store-card p span { font-size:13px; line-height:1.5; }
+.mobile:has(#content > .grid) .employee-store-card-header b { font-size:16px; }
+.mobile:has(#content > .grid) .store-edit-button { padding:5px 8px; font-size:12px; }
+.mobile:has(#content > .grid) .row { padding:8px 0; font-size:14px; }
+.mobile:has(#content > .grid) .row input { margin:5px 8px 5px 0!important; }
+.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart { max-height:170px; }
+.mobile:has(#content > .grid) .boss-sales-trend .trend-total { font-size:25px; margin:4px 0; }
+.mobile:has(#content > .grid) .trend-total span { display:inline; margin-left:10px; font-size:12px; }
+.mobile:has(#content > .grid) .boss-sales-trend > .employee-trend-card { margin-bottom:4px; }
+.mobile:has(#content > .grid) .trend-card-heading h2 { margin:0; font-size:13px!important; }
+.mobile:has(#content > .grid) .trend-data summary { padding:3px 0; font-size:12px; }
+.mobile:has(#content > .grid) .boss-sales-trend + button { padding:6px 9px; font-size:13px; }
+.mobile:has(#content > .grid) .bottom { padding-top:6px; padding-bottom:calc(6px + env(safe-area-inset-bottom)); }
+.mobile:has(#content > .grid) .bottom button { padding-top:5px; padding-bottom:5px; }
+@media(max-height:760px){.mobile:has(#content > .grid) > .main{padding-top:8px;padding-bottom:76px}.mobile:has(#content > .grid) .top{margin-bottom:8px}.mobile:has(#content > .grid) #content > .grid > .metric{padding:7px 10px}.mobile:has(#content > .grid) #content > .card{padding:9px;margin-top:7px!important}.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart{max-height:112px}.mobile:has(#content > .grid) .boss-sales-trend .trend-total{font-size:22px;margin:0}.mobile:has(#content > .grid) .trend-card-heading{display:none}.mobile:has(#content > .grid) .employee-store-card p{margin-top:3px}.mobile:has(#content > .grid) .row{padding:4px 0}}
+
+#roles, body > header, body > .hint { display:none!important; }
+</style>
 </head>
 <body>
   <header>
@@ -1726,7 +1758,6 @@ render = function () {
   updateEmployeeCustomers();
   updateKnowledge();
 };
-// 本文件固定打开员工网页，不受地址中的角色参数影响。
 const initialRole = 3;
 if (initialRole >= 0 && initialRole < 4) {
   role = initialRole;
@@ -1741,8 +1772,7 @@ if (new URLSearchParams(location.search).has("embed")) {
   );
 }
 render();
-
-  </script>
+</script>
 </body>
 </html>
 

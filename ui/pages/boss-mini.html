@@ -873,12 +873,12 @@ dialog .row > span:last-child {
   color: #7b8974;
 }
 
-#roles { display: none; }
+
 
 /* 实际设备布局：去掉演示外壳和模拟设备边框，页面铺满浏览器。 */
 html, body { min-height: 100%; background: #fff; }
 body { margin: 0; min-height: 100dvh; }
-body > header, body > .hint { display: none !important; }
+
 .shell, .shell.mobile {
   width: 100%; max-width: none !important; min-height: 100dvh;
   margin: 0 !important; border: 0 !important; border-radius: 0 !important;
@@ -936,7 +936,10 @@ body > header, body > .hint { display: none !important; }
 .mobile:has(#content > .grid) .boss-sales-trend + button { padding:6px 9px; font-size:13px; }
 .mobile:has(#content > .grid) .bottom { padding-top:6px; padding-bottom:calc(6px + env(safe-area-inset-bottom)); }
 .mobile:has(#content > .grid) .bottom button { padding-top:5px; padding-bottom:5px; }
-@media(max-height:760px){.mobile:has(#content > .grid) > .main{padding-top:8px;padding-bottom:76px}.mobile:has(#content > .grid) .top{margin-bottom:8px}.mobile:has(#content > .grid) #content > .grid > .metric{padding:7px 10px}.mobile:has(#content > .grid) #content > .card{padding:9px;margin-top:7px!important}.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart{max-height:112px}.mobile:has(#content > .grid) .boss-sales-trend .trend-total{font-size:22px;margin:0}.mobile:has(#content > .grid) .trend-card-heading{display:none}.mobile:has(#content > .grid) .employee-store-card p{margin-top:3px}.mobile:has(#content > .grid) .row{padding:4px 0}}  </style>
+@media(max-height:760px){.mobile:has(#content > .grid) > .main{padding-top:8px;padding-bottom:76px}.mobile:has(#content > .grid) .top{margin-bottom:8px}.mobile:has(#content > .grid) #content > .grid > .metric{padding:7px 10px}.mobile:has(#content > .grid) #content > .card{padding:9px;margin-top:7px!important}.mobile:has(#content > .grid) .boss-sales-trend .weekly-chart{max-height:112px}.mobile:has(#content > .grid) .boss-sales-trend .trend-total{font-size:22px;margin:0}.mobile:has(#content > .grid) .trend-card-heading{display:none}.mobile:has(#content > .grid) .employee-store-card p{margin-top:3px}.mobile:has(#content > .grid) .row{padding:4px 0}}
+
+#roles, body > header, body > .hint { display:none!important; }
+</style>
 </head>
 <body>
   <header>
@@ -1755,7 +1758,6 @@ render = function () {
   updateEmployeeCustomers();
   updateKnowledge();
 };
-// 本文件固定打开老板小程序，不受地址中的角色参数影响。
 const initialRole = 0;
 if (initialRole >= 0 && initialRole < 4) {
   role = initialRole;
@@ -1770,8 +1772,7 @@ if (new URLSearchParams(location.search).has("embed")) {
   );
 }
 render();
-
-  </script>
+</script>
 </body>
 </html>
 
