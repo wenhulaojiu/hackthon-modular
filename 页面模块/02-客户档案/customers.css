@@ -1,0 +1,26 @@
+/* 客户档案卡片墙：一行两张圆角卡片，头像放大，柔和淡彩区分 */
+.customer-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px 23px; }
+@media (max-width: 1100px) { .customer-cards { grid-template-columns: minmax(0, 1fr); } }
+
+.customer-card { display: flex; flex-direction: column; gap: 10px; border: 1px solid; border-radius: 14px; padding: 16px 18px; text-align: left; cursor: pointer; box-shadow: 0 1px 3px #14261a0d; transition: transform .16s, box-shadow .16s, border-color .16s; }
+.customer-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px #14261a14; }
+.customer-card:focus-visible { outline: 3px solid var(--kexu-line); outline-offset: 2px; }
+
+.customer-card-head { display: flex; align-items: center; gap: 12px; }
+.customer-card-avatar { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 19px; font-weight: 600; flex-shrink: 0; }
+.customer-card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.customer-card-title strong { font-size: 15px; color: var(--kexu-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-card-sub { font-size: 12px; color: var(--kexu-muted); }
+.customer-card-new { background: #7b9e29; color: #fff; font-size: 11px; font-weight: 600; border-radius: 6px; padding: 2px 8px; flex-shrink: 0; }
+
+.customer-card-baby { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.customer-card-baby-extra { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px; background: var(--kexu-accent-soft); color: var(--kexu-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.customer-card-baby-extra.warn { background: #fdf2f2; color: #b3544e; }
+
+.customer-card-prefs { margin: 0; font-size: 12px; color: var(--kexu-muted); line-height: 1.7; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.customer-card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.customer-card-tags span { background: #ffffffb8; border: 1px solid var(--kexu-line); border-radius: 5px; font-size: 11px; padding: 1px 7px; color: var(--kexu-muted); }
+
+.customer-card-foot { display: flex; justify-content: space-between; gap: 8px; border-top: 1px dashed #14261a1a; padding-top: 9px; font-size: 11px; color: var(--kexu-muted); flex-wrap: wrap; }
+.customer-card-due { color: #c2884a; font-weight: 600; }

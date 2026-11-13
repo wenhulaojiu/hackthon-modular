@@ -52,7 +52,7 @@ export function stageHintForMonths(months: number): string {
 export function babyProfileLabel(baby: BabyProfile | undefined, todayDate: string): string {
   const months = babyAgeMonths(baby, todayDate);
   if (months === null) return '未登记宝宝档案';
-  const parts = [`宝宝 ${months} 个月`];
+  const parts = [`${baby?.gender || '宝宝'} ${months} 个月`];
   if (baby?.formulaStage) parts.push(baby.formulaStage);
   if (baby?.allergies?.trim()) parts.push('有过敏/注意事项');
   return parts.join(' · ');

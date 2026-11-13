@@ -5,10 +5,12 @@ import { ArrowDownLeft, ArrowUpDown, ArrowUpRight, Bot, CalendarDays, Check, Che
 import type { AIResult, AppState, Customer, CustomersProps, CustomerStage, Order } from '../../lib/types';
 import { customerStats, shiftDate, today } from '../../lib/domain';
 import { localRepliesAvailable, replyConfigFor, replyRequest, replySettingsFor } from '../05-自动回复/reply-ui';
-import { customerContactTimestamp, sortCustomers, type CustomerSort } from './customer-sorting';
+import { sortCustomers, type CustomerSort } from './customer-sorting';
 import VoiceProfilePanel from './voice-profile';
 import ValueTierCard from './value-tier';
 import BabyProfileEditor, { BabyBadge } from './baby-profile';
+import { BABY_FEEDING_LABELS } from '../../lib/baby-milestones';
+import './customers.css';
 import { documentToCustomers, type ParsedDocument } from '../../lib/file-import';
 import FileImportButton from '../09-公共工具与样式/file-import-button';
 
@@ -222,11 +224,26 @@ export default function Customers({ state, onChange, notify, onAI, selectedId, o
     <div className="card customers-card">
       <div className="customers-toolbar"><div className="search-field"><Search size={17} /><input aria-label="搜索客户" placeholder="搜索姓名、微信号或标签…" value={search} onChange={event => setSearch(event.target.value)} />{search && <button className="icon-button" aria-label="清空搜索" onClick={() => setSearch('')}><X size={14} /></button>}</div><span className="muted small">共 {state.customers.length} 位客户</span></div>
       <div className="customer-sort-bar"><div className="customer-sort-options" role="group" aria-label="客户排序"><span><ArrowUpDown size={15} />排序</span>{([{ value: 'date-asc', label: '日期升序' }, { value: 'date-desc', label: '日期降序' }, { value: 'activity-desc', label: '客户活跃度' }] as const).map(option => <button type="button" className={sort === option.value ? 'active' : ''} aria-pressed={sort === option.value} key={option.value} onClick={() => setSort(option.value)}>{option.label}</button>)}</div><span className="customer-sort-help">{sort === 'activity-desc' ? '按近30天客户消息数，由多到少；相同时最近联系优先' : `按最近联系日期，由${sort === 'date-asc' ? '早到晚' : '晚到早'}；无联系日期的排最后`}</span></div>
-      <div className="table-wrap"><table className="data-table"><thead><tr><th>客户</th><th>客户标签</th><th>最近联系</th><th>累计净消费</th><th>购买次数</th><th>下次跟进</th><th aria-label="查看详情" /></tr></thead><tbody>{filtered.map(item => {
+      <div className="customer-cards">{filtered.map(item => {
         const stats = statsFor(state, item.id); const overdue = item.nextFollowUpAt && item.nextFollowUpAt <= today();
-        const lastContact = customerContactTimestamp(item);
-        return <tr key={item.id} className="customer-row" onClick={() => onSelect(item.id)} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') onSelect(item.id); }}><td><div className="customer-cell"><span className="avatar" style={{ background: `${item.color}18`, color: item.color }}>{item.name.slice(-2)}</span><div><strong>{item.name}</strong><BabyBadge baby={item.baby} /><span className="customer-source">{item.wechatId || SOURCE_LABELS[item.source]}</span></div></div></td><td><div className="tag-list">{[...item.tags, ...item.manualTags].slice(0, 2).map((tag, index) => <span className="customer-tag" key={`${tag}-${index}`}>{tag}</span>)}{item.tags.length + item.manualTags.length > 2 && <span className="muted small">+{item.tags.length + item.manualTags.length - 2}</span>}{!item.tags.length && !item.manualTags.length && <span className="muted">—</span>}</div></td><td className="customer-contact-date"><span className="muted">{lastContact === null ? '暂无记录' : new Date(lastContact).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })}</span></td><td className="money-cell">{money(stats.total)}</td><td><span className="purchase-count">{stats.count}</span><span className="muted small"> 次</span></td><td><span className={overdue ? 'date-due' : 'muted'}>{item.nextFollowUpAt ? <><CalendarDays size={13} />{item.nextFollowUpAt.slice(5).replace('-', '/')}</> : '未设置'}</span></td><td><ChevronRight size={16} className="muted" /></td></tr>;
-      })}</tbody></table></div>
+        const joined = item.createdAt?.slice(0, 10); const isNew = !!joined && joined >= shiftDate(-7);
+        const tags = [...item.manualTags, ...item.tags];
+        return <button type="button" key={item.id} className="customer-card" style={{ background: `color-mix(in srgb, ${item.color} 7%, #fff)`, borderColor: `color-mix(in srgb, ${item.color} 22%, #fff)` }} onClick={() => onSelect(item.id)}>
+          <div className="customer-card-head">
+            <span className="customer-card-avatar" style={{ background: `${item.color}1f`, color: item.color }}>{item.name.slice(-2)}</span>
+            <div className="customer-card-title"><strong>{item.name}</strong><span className="customer-card-sub">{item.stage} · {SOURCE_LABELS[item.source]}</span></div>
+            {isNew && <span className="customer-card-new">新加入</span>}
+          </div>
+          <div className="customer-card-baby"><BabyBadge baby={item.baby} />{item.baby?.feeding ? <span className="customer-card-baby-extra">{BABY_FEEDING_LABELS[item.baby.feeding]}</span> : null}{item.baby?.allergies?.trim() ? <span className="customer-card-baby-extra warn">过敏注意</span> : null}</div>
+          {item.preferences && <p className="customer-card-prefs">{item.preferences}</p>}
+          {!!tags.length && <div className="customer-card-tags">{tags.slice(0, 3).map((tag, index) => <span key={`${tag}-${index}`}>{tag}</span>)}</div>}
+          <div className="customer-card-foot">
+            <span>加入 {joined || '—'}</span>
+            <span>{money(stats.total)} · {stats.count} 次</span>
+            <span className={overdue ? 'customer-card-due' : ''}>{item.nextFollowUpAt ? `跟进 ${item.nextFollowUpAt.slice(5).replace('-', '/')}` : '未设跟进'}</span>
+          </div>
+        </button>;
+      })}</div>
       {!filtered.length && <div className="empty-state"><Search size={29} /><h3>{state.customers.length ? '没有找到匹配的客户' : '从第一位客户开始'}</h3><p>{state.customers.length ? '试试其他姓名、微信号或标签关键词。' : '新建客户，或在微信导入页面导入聊天记录。'}</p>{!state.customers.length && <button className="btn secondary" onClick={() => setShowCreate(true)}><Plus size={15} />新建客户</button>}</div>}
       {!!filtered.length && <div className="table-footer"><span>显示 {filtered.length} 位客户</span></div>}
     </div>

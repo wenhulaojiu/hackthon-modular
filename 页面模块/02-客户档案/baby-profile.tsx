@@ -21,7 +21,7 @@ type EditorProps = {
   notify: (text: string, error?: boolean) => void;
 };
 
-const blank = (): BabyProfile => ({ name: '', birthDate: '', ageMonths: undefined, feeding: '', formulaStage: '', allergies: '', notes: '' });
+const blank = (): BabyProfile => ({ name: '', birthDate: '', ageMonths: undefined, gender: '', feeding: '', formulaStage: '', allergies: '', notes: '' });
 
 /** 客户画像中的宝宝档案编辑区：只记录家长提供的事实与医生建议，不作医疗判断。 */
 export default function BabyProfileEditor({ customer, onSave, notify }: EditorProps) {
@@ -49,6 +49,7 @@ export default function BabyProfileEditor({ customer, onSave, notify }: EditorPr
       <label className="field">宝宝小名<input className="input" maxLength={80} value={draft.name ?? ''} onChange={event => patch({ name: event.target.value })} placeholder="选填" /></label>
       <label className="field">出生日期<input className="input" type="date" value={draft.birthDate ?? ''} onChange={event => patch({ birthDate: event.target.value })} /></label>
       <label className="field">月龄（未填出生日期时填写）<input className="input" type="number" min={0} max={72} value={draft.ageMonths ?? ''} onChange={event => patch({ ageMonths: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="如：6" /></label>
+      <label className="field">宝宝性别<select className="input" value={draft.gender ?? ''} onChange={event => patch({ gender: event.target.value as BabyProfile['gender'] })}><option value="">未填写</option><option value="男宝">男宝</option><option value="女宝">女宝</option></select></label>
       <label className="field">喂养方式<select className="input" value={draft.feeding ?? ''} onChange={event => patch({ feeding: event.target.value as BabyProfile['feeding'] })}>{(Object.keys(BABY_FEEDING_LABELS) as Array<NonNullable<BabyProfile['feeding']>>).map(key => <option key={key} value={key}>{BABY_FEEDING_LABELS[key]}</option>)}</select></label>
       <label className="field">奶粉段位<select className="input" value={draft.formulaStage ?? ''} onChange={event => patch({ formulaStage: event.target.value as BabyProfile['formulaStage'] })}>{BABY_FORMULA_STAGES.map(stage => <option key={stage} value={stage}>{stage || '未填写'}</option>)}</select></label>
     </div>

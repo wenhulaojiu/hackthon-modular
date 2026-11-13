@@ -60,6 +60,7 @@ export const aiSettingsSchema = z.object({
 const faqSchema = z.object({ question: z.string().min(1).max(500), answer: z.string().min(1).max(4000) }).strict();
 const babyProfileSchema = z.object({
   name: z.string().max(80).optional(), birthDate: optionalDate, ageMonths: z.number().int().min(0).max(72).optional(),
+  gender: z.enum(["男宝", "女宝", ""]).optional(),
   feeding: z.enum(["breast", "mixed", "formula", ""]).optional(),
   formulaStage: z.enum(["1段", "2段", "3段", "4段", ""]).optional(),
   allergies: z.string().max(500).optional(), notes: z.string().max(1000).optional(),

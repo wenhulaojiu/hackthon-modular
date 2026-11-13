@@ -2,7 +2,7 @@ export type CustomerStage = '新客户' | '潜在客户' | '活跃客户' | '重
 export type Evidence = { id: string; text: string; date: string; source: string };
 export type ChatMessage = { id: string; sender: 'customer' | 'merchant'; text: string; date: string };
 export type BabyProfile = {
-  name?: string; birthDate?: string; ageMonths?: number;
+  name?: string; birthDate?: string; ageMonths?: number; gender?: '男宝' | '女宝' | '';
   feeding?: 'breast' | 'mixed' | 'formula' | '';
   formulaStage?: '1段' | '2段' | '3段' | '4段' | '';
   allergies?: string; notes?: string;
