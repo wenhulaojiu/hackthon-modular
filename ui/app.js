@@ -166,6 +166,50 @@ function greeting(name) {
   const word = h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
   return `${word}，${name}`;
 }
+function currentProfile() {
+  const boss = configs[role].boss;
+  data.profiles = data.profiles || {};
+  const key = boss ? "boss" : "staff";
+  if (!data.profiles[key]) data.profiles[key] = { name: boss ? "王总" : "小陈", avatar: "" };
+  return data.profiles[key];
+}
+function profileAvatarHtml(profile, className = "profile-avatar") {
+  return `<span class="${className}">${profile.avatar ? `<img src="${profile.avatar}" alt="${esc(profile.name)}的头像">` : esc(profile.name.slice(0, 1) || "我")}</span>`;
+}
+function topHeading() {
+  const c = configs[role];
+  if (page === "我的") {
+    const profile = currentProfile();
+    return `<div class="top profile-top"><div class="profile-summary">${profileAvatarHtml(profile)}<div class="greeting-line">${esc(profile.name)}</div></div><button class="profile-menu" aria-label="编辑头像和名字" onclick="editProfile()">•••</button></div>`;
+  }
+  return `<div class="top"><div><div class="greeting-line">${["首页","总览"].includes(page) ? (c.boss ? greeting("老板") : greeting("小陈")) : page}</div></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`;
+}
+function editProfile() {
+  const profile = currentProfile();
+  modal(`<h2>编辑个人资料</h2><div class="profile-edit-preview" id="profile-edit-preview">${profileAvatarHtml(profile, "profile-avatar large")}</div><label class="ai-field">名字<input id="profile-name" maxlength="20" value="${esc(profile.name)}" placeholder="输入名字"></label><label class="ai-field">从头像相册选择图片<input id="profile-file" type="file" accept="image/*" onchange="previewProfileAvatar(this)"></label><input id="profile-avatar-data" type="hidden" value="${esc(profile.avatar)}"><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="saveProfile()">保存</button></div>`);
+}
+function previewProfileAvatar(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) return toast("请选择图片文件");
+  if (file.size > 1024 * 1024) return toast("图片请小于 1MB，避免浏览器存储空间不足");
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("profile-avatar-data").value = reader.result;
+    document.getElementById("profile-edit-preview").innerHTML = `<span class="profile-avatar large"><img src="${reader.result}" alt="新头像预览"></span>`;
+  };
+  reader.readAsDataURL(file);
+}
+function saveProfile() {
+  const name = document.getElementById("profile-name").value.trim();
+  if (!name) return toast("请填写名字");
+  const boss = configs[role].boss;
+  data.profiles[boss ? "boss" : "staff"] = { name, avatar: document.getElementById("profile-avatar-data").value };
+  save();
+  closeModal();
+  render();
+  toast("头像和名字已保存");
+}
 function render() {
   const c = configs[role];
   document.getElementById("roles").innerHTML = configs
@@ -175,7 +219,7 @@ function render() {
     )
     .join("");
   document.getElementById("app").innerHTML =
-    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${employeeCustomersVisible() ? customerHeading() : `<div class="top"><div><div class="greeting-line">${["首页","总览"].includes(page) ? (c.boss ? greeting("老板") : greeting("小陈")) : page}</div></div><div class="avatar">${c.boss ? "店" : "陈"}</div></div>`}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
+    `<div class="shell ${c.mobile ? "mobile" : ""}"><aside class="sidebar"><b>客序</b>${nav()}<p>青禾母婴 · ${c.boss ? "管理端" : "员工端"}</p></aside><main class="main">${employeeCustomersVisible() ? customerHeading() : topHeading()}<div id="content">${content()}</div></main><nav class="bottom" aria-label="底部导航">${nav(true)}</nav></div>`;
 }
 function employeeCustomerPage() {
   return `<div class="customer-list-toolbar"><label class="customer-stage-filter"><span class="muted">顾客时期</span><select aria-label="顾客时期筛选" onchange="customerStage=this.value;updateEmployeeCustomers()"><option value="">全部时期</option>${["一段", "二段", "三段", "四段"].map((v) => `<option value="${v}" ${customerStage === v ? "selected" : ""}>${stageText(v)}</option>`).join("")}</select></label><button class="primary" onclick="edit('customers')">＋ 新建客户</button></div><p class="customer-result-count muted" id="employee-customer-count"></p><div class="employee-customer-list" id="employee-customer-list"></div>`;
@@ -214,9 +258,23 @@ function employeeStore() {
     }
   );
 }
+function employeeNotifications() {
+  const storeName = employeeStore().name.replace("青禾母婴 · ", "");
+  return (data.notifications || []).filter((n) => n.stores.includes(storeName));
+}
 function employeeStoreCard() {
   const x = employeeStore();
-  return `<div class="employee-store-line" aria-label="门店信息"><b>${esc(x.name)}</b></div>`;
+  const list = employeeNotifications();
+  const reads = data.notificationReadIds || [];
+  const unread = list.some((n) => !reads.includes(n.id));
+  return `<div class="employee-store-line" aria-label="门店信息"><b>${esc(x.name)}</b><button class="notice-bell ${unread ? "has-new" : ""}" onclick="showEmployeeNotifications()" aria-label="${unread ? "有新活动通知" : "查看活动通知"}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>${unread ? "新活动通知" : list.length ? "活动通知" : "暂无活动通知"}</span>${unread ? '<i class="notice-red-dot"></i>' : ""}</button></div>`;
+}
+function showEmployeeNotifications() {
+  const list = employeeNotifications();
+  modal(`<h2>活动通知</h2>${list.length ? list.map((n) => `<article class="notification-card"><h3>${esc(n.name)}</h3><p>${esc(n.content || "活动内容待补充")}</p><span class="muted">${esc(n.date)}</span></article>`).join("") : '<div class="empty-state"><h3>暂无活动通知</h3><p>老板发送活动通知后会显示在这里。</p></div>'}<div class="actions"><button class="primary" onclick="closeModal()">知道了</button></div>`);
+  data.notificationReadIds = [...new Set([...(data.notificationReadIds || []), ...list.map((n) => n.id)])];
+  save();
+  render();
 }
 function employeeHomeLineChart() {
   const rows = employeeWeeklyDemo;
@@ -361,6 +419,12 @@ function tasks() {
     )
     .join("");
 }
+function customerListCard(x, i) {
+  if (configs[role].boss && configs[role].mobile) {
+    return `<div class="card customer searchable boss-customer-card" onclick="detail(${i})"><div class="bc-head"><span class="cc-avatar">${esc(x.name.slice(-2))}</span><b>${esc(x.name)}</b></div><div class="bc-baby">${esc(x.baby || "宝宝月龄未填写")}</div><div class="bc-spend">${esc(x.store || "未填写门店")}<br>累计 <b>¥ ${Number(x.amount || 0).toLocaleString()}</b></div><span class="bc-more">查看 →</span></div>`;
+  }
+  return `<div class="card customer searchable customer-card-v2" onclick="detail(${i})"><div class="cc-head"><div class="avatar cc-avatar">${esc(x.name.slice(-2))}</div><div class="cc-id"><b class="cc-name">${esc(x.name)}</b><div class="cc-contact">微信：${esc(x.wechat || "未填写")}<br>电话：${esc(x.phone || "未填写")}</div></div></div><div class="cc-baby">${esc(x.baby)}<span class="cc-stage">${esc(stageText(x.stage) || "时期未设置")}</span></div><p class="cc-note">${esc(x.note)}</p><div class="cc-store">${esc(x.store || "未填写门店")} · 累计消费 <b>¥ ${Number(x.amount || 0).toLocaleString()}</b></div><div class="cc-foot"><span class="cc-time">最近联系：${esc((x.lastContact || "未记录").replace("T", " "))}<br>下次联系：${esc((x.nextContact || "未安排").replace("T", " "))}</span><span class="cc-more">查看档案 →</span></div></div>`;
+}
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
@@ -368,7 +432,7 @@ function content() {
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))
-    return `<button class="primary" onclick="edit('customers')">＋ 新建客户</button><h2>按顾客时期分类</h2><div class="grid" style="margin:16px 0">${["一段", "二段", "三段", "四段"].map((v) => `<button class="card stage-card ${customerStage === v ? "primary" : ""}" onclick="customerStage='${v}';render()"><span class="stage-card-title">${stageText(v)}顾客</span><strong class="stage-card-count">${data.customers.filter((x) => x.stage === v).length} 位</strong><span class="stage-card-more">查看该时期全部顾客 →</span></button>`).join("")}</div><div class="top"><h2>${customerStage ? customerStage + "时期顾客" : "全部顾客"} · ${data.customers.filter((x) => !customerStage || x.stage === customerStage).length} 位</h2>${customerStage ? `<button onclick="customerStage='';render()">查看全部顾客</button>` : ""}</div><input placeholder="搜索姓名、微信、联系方式、门店…" oninput="filter(this.value)"><div class="grid">${data.customers.map((x, i) => (customerStage && x.stage !== customerStage ? "" : `<div class="card customer searchable customer-card-v2" onclick="detail(${i})"><div class="cc-head"><div class="avatar cc-avatar">${esc(x.name.slice(-2))}</div><div class="cc-id"><b class="cc-name">${esc(x.name)}</b><div class="cc-contact">微信：${esc(x.wechat || "未填写")}<br>电话：${esc(x.phone || "未填写")}</div></div></div><div class="cc-baby">${esc(x.baby)}<span class="cc-stage">${esc(stageText(x.stage) || "时期未设置")}</span></div><p class="cc-note">${esc(x.note)}</p><div class="cc-store">${esc(x.store || "未填写门店")} · 累计消费 <b>¥ ${Number(x.amount || 0).toLocaleString()}</b></div><div class="cc-foot"><span class="cc-time">最近联系：${esc((x.lastContact || "未记录").replace("T", " "))}<br>下次联系：${esc((x.nextContact || "未安排").replace("T", " "))}</span><span class="cc-more">查看档案 →</span></div></div>`)).join("")}</div>`;
+    return `<button class="primary" onclick="edit('customers')">＋ 新建客户</button><h2>按顾客时期分类</h2><div class="grid" style="margin:16px 0">${["一段", "二段", "三段", "四段"].map((v) => `<button class="card stage-card ${customerStage === v ? "primary" : ""}" onclick="customerStage='${v}';render()"><span class="stage-card-title">${stageText(v)}顾客</span><strong class="stage-card-count">${data.customers.filter((x) => x.stage === v).length} 位</strong><span class="stage-card-more">查看该时期全部顾客 →</span></button>`).join("")}</div><div class="top"><h2>${customerStage ? customerStage + "时期顾客" : "全部顾客"} · ${data.customers.filter((x) => !customerStage || x.stage === customerStage).length} 位</h2>${customerStage ? `<button onclick="customerStage='';render()">查看全部顾客</button>` : ""}</div><input placeholder="搜索姓名、微信、联系方式、门店…" oninput="filter(this.value)"><div class="grid">${data.customers.map((x, i) => (customerStage && x.stage !== customerStage ? "" : customerListCard(x, i))).join("")}</div>`;
   if (page === "知识库") return c.mobile ? knowledgePage() : knowledgeWebPage();
   if (page === "自动回复" && !c.mobile) return autoReplyPage();
   if (["商品", "服务与商品"].includes(page))
@@ -380,7 +444,7 @@ function content() {
   }
   if (page === "自动回复")
     return `<div class="card"><h2>自动回复设置</h2><label><input style="width:auto" type="checkbox" ${data.auto ? "checked" : ""} onchange="data.auto=this.checked;save();toast('设置已保存到原型')"> 启用自动回复</label><p>遇到超出知识库的问题，转交销售人工处理。</p><textarea id="reply" placeholder="输入欢迎语">${esc(data.reply || "你好，欢迎来到青禾母婴，请问有什么可以帮你？")}</textarea><button class="primary" onclick="data.reply=document.getElementById('reply').value;save();toast('欢迎语已保存')">保存</button></div>`;
-  return `<div class="card"><h2>${c.boss ? "老板 · 账号与团队" : "小陈 · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div>${!c.boss ? `<h2>我的门店</h2><p class="muted">${esc(employeeStore().name)}<br>${esc(employeeStore().address)} · ${esc(employeeStore().phone)}</p><button class="primary" onclick="editEmployeeStore()">编辑门店信息</button>` : ""}<h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><h2 style="margin-top:22px">AI 模型配置</h2><label class="ai-field">服务商<select id="ai-provider" onchange="const p={DeepSeek:['https://api.deepseek.com','deepseek-chat'],通义千问:['https://dashscope.aliyuncs.com/compatible-mode/v1','qwen-plus']}[this.value];if(p){document.getElementById('ai-baseurl').value=p[0];document.getElementById('ai-model').value=p[1]}"><option>DeepSeek</option><option>通义千问</option><option>自定义兼容接口</option></select></label><label class="ai-field">API 地址<input id="ai-baseurl" placeholder="https://api.deepseek.com" value="${esc(data.aiBaseUrl || "https://api.deepseek.com")}"></label><label class="ai-field">模型名称<input id="ai-model" placeholder="deepseek-chat" value="${esc(data.aiModel || "deepseek-chat")}"></label><label class="ai-field">API Key<input id="ai-key" type="password" placeholder="输入你的 API Key，仅保存在本浏览器" value="${esc(data.aiKey || "")}"></label><label class="ai-field">表达灵活度 <span class="muted" id="ai-temp-label">${data.aiTemp ?? 0.3}</span><input id="ai-temp" type="range" min="0" max="2" step="0.1" value="${data.aiTemp ?? 0.3}" oninput="document.getElementById('ai-temp-label').textContent=this.value" style="width:100%"></label><button class="primary" onclick="data.aiBaseUrl=document.getElementById('ai-baseurl').value;data.aiModel=document.getElementById('ai-model').value;data.aiKey=document.getElementById('ai-key').value;data.aiTemp=Number(document.getElementById('ai-temp').value);save();toast('AI 配置已保存到本浏览器')">保存 AI 配置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
+  return `<div class="card"><h2>${c.boss ? esc(currentProfile().name) + " · 账号与团队" : esc(currentProfile().name) + " · 城南店"}</h2><div class="row">客户数 <b>${c.boss ? "2,460" : "128"}</b></div><div class="row">本月销售额 <b>¥ ${c.boss ? "86,400" : "12,860"}</b></div>${!c.boss ? `<h2>我的门店</h2><p class="muted">${esc(employeeStore().name)}<br>${esc(employeeStore().address)} · ${esc(employeeStore().phone)}</p><button class="primary" onclick="editEmployeeStore()">编辑门店信息</button>` : ""}<h2>门店显示名称</h2><input id="shopname" value="${esc(data.shop || "青禾母婴")}"><button class="primary" onclick="data.shop=document.getElementById('shopname').value;save();toast('名称已保存')">保存设置</button><h2 style="margin-top:22px">AI 模型配置</h2><label class="ai-field">服务商<select id="ai-provider" onchange="const p={DeepSeek:['https://api.deepseek.com','deepseek-chat'],通义千问:['https://dashscope.aliyuncs.com/compatible-mode/v1','qwen-plus']}[this.value];if(p){document.getElementById('ai-baseurl').value=p[0];document.getElementById('ai-model').value=p[1]}"><option>DeepSeek</option><option>通义千问</option><option>自定义兼容接口</option></select></label><label class="ai-field">API 地址<input id="ai-baseurl" placeholder="https://api.deepseek.com" value="${esc(data.aiBaseUrl || "https://api.deepseek.com")}"></label><label class="ai-field">模型名称<input id="ai-model" placeholder="deepseek-chat" value="${esc(data.aiModel || "deepseek-chat")}"></label><label class="ai-field">API Key<input id="ai-key" type="password" placeholder="输入你的 API Key，仅保存在本浏览器" value="${esc(data.aiKey || "")}"></label><label class="ai-field">表达灵活度 <span class="muted" id="ai-temp-label">${data.aiTemp ?? 0.3}</span><input id="ai-temp" type="range" min="0" max="2" step="0.1" value="${data.aiTemp ?? 0.3}" oninput="document.getElementById('ai-temp-label').textContent=this.value" style="width:100%"></label><button class="primary" onclick="data.aiBaseUrl=document.getElementById('ai-baseurl').value;data.aiModel=document.getElementById('ai-model').value;data.aiKey=document.getElementById('ai-key').value;data.aiTemp=Number(document.getElementById('ai-temp').value);save();toast('AI 配置已保存到本浏览器')">保存 AI 配置</button><p class="notice">模型、权限与多端同步仅为布局示意，未连接真实服务。</p><button onclick="if(confirm('清空原型修改并恢复示例？')){data=structuredClone(base);save();render()}">重置所有示例修改</button></div>`;
 }
 function knowledgeWebPage() {
   const left = ["产品", "服务", "专业", "其他"]
@@ -592,19 +656,11 @@ function opts(values, current, label) {
   );
 }
 function storePage() {
-  const cities = sf.province
-    ? unique(
-        "city",
-        stores.filter((x) => x.province === sf.province),
-      )
-    : [];
-  const districts = sf.city
-    ? unique(
-        "district",
-        stores.filter((x) => x.province === sf.province && x.city === sf.city),
-      )
-    : [];
-  return `<div class="card"><div class="muted">按所在地筛选</div><div class="geo"><label>省份<select onchange="setStoreFilter('province',this.value)">${opts(unique("province", stores), sf.province, "全部省份")}</select></label><label>城市<select ${!sf.province ? "disabled" : ""} onchange="setStoreFilter('city',this.value)">${opts(cities, sf.city, "全部城市")}</select></label><label>区 / 县<select ${!sf.city ? "disabled" : ""} onchange="setStoreFilter('district',this.value)">${opts(districts, sf.district, "全部区县")}</select></label></div><input aria-label="搜索门店" placeholder="搜索门店、地址、负责人…" value="${esc(sf.query)}" oninput="sf.query=this.value;updateStores()"><div class="geo"><label>排序指标<select onchange="setStoreFilter('sort',this.value)">${[
+  const provinceData = CHINA_GEO.find((x) => x.name === sf.province);
+  const cities = provinceData ? provinceData.cities.map((x) => x.name) : [];
+  const cityData = provinceData && provinceData.cities.find((x) => x.name === sf.city);
+  const districts = cityData ? cityData.areas : [];
+  return `<div class="card"><div class="muted">按所在地筛选</div><div class="geo"><label>省份<select onchange="setStoreFilter('province',this.value)">${opts(CHINA_GEO.map((x) => x.name), sf.province, "全部省份")}</select></label><label>城市<select ${!sf.province ? "disabled" : ""} onchange="setStoreFilter('city',this.value)">${opts(cities, sf.city, "全部城市")}</select></label><label>区 / 县<select ${!sf.city ? "disabled" : ""} onchange="setStoreFilter('district',this.value)">${opts(districts, sf.district, "全部区县")}</select></label></div><input aria-label="搜索门店" placeholder="搜索门店、地址、负责人…" value="${esc(sf.query)}" oninput="sf.query=this.value;updateStores()"><div class="geo"><label>排序指标<select onchange="setStoreFilter('sort',this.value)">${[
     ["customers", "顾客人数"],
     ["employees", "员工人数"],
     ["today", "今日销售额"],
@@ -677,8 +733,23 @@ function campaign() {
   campaignStores = [];
   const staff = !configs[role].boss;
   modal(
-    `<h2>创建活动</h2><input id="campaign" placeholder="活动名称，如周末母婴体验日"><textarea placeholder="活动介绍与服务内容"></textarea><h2>${staff ? "选择目标客户" : "选择目标门店"}</h2><div class="campaign-store-list">${(staff ? data.customers : stores).map((x) => `<label class="campaign-store"><span class="campaign-store-name">${staff ? esc(x.name) + (x.baby ? " · " + esc(x.baby) : "") : "青禾母婴 · " + esc(x.name)}</span><input class="campaign-check" type="checkbox" aria-label="选择${esc(x.name)}" onchange="this.closest('.campaign-store').classList.toggle('checked',this.checked)"></label>`).join("")}</div><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="closeModal();toast('已生成示例活动任务，未实际发送')">生成任务</button></div>`,
+    `<h2>创建活动</h2><input id="campaign-name" placeholder="活动名称，如周末母婴体验日"><textarea id="campaign-content" placeholder="活动介绍与服务内容"></textarea><h2>${staff ? "选择目标客户" : "选择目标门店"}</h2><div class="campaign-store-list">${(staff ? data.customers : stores).map((x) => `<label class="campaign-store"><span class="campaign-store-name">${staff ? esc(x.name) + (x.baby ? " · " + esc(x.baby) : "") : "青禾母婴 · " + esc(x.name)}</span><input class="campaign-check campaign-target-check" type="checkbox" value="${esc(x.name)}" aria-label="选择${esc(x.name)}" onchange="this.closest('.campaign-store').classList.toggle('checked',this.checked)"></label>`).join("")}</div><div class="actions"><button onclick="closeModal()">取消</button><button class="primary" onclick="${staff ? "closeModal();toast('已生成活动任务')" : "sendActivityNotification()"}">${staff ? "生成任务" : "发送活动通知"}</button></div>`,
   );
+}
+function sendActivityNotification() {
+  const name = document.getElementById("campaign-name").value.trim();
+  const content = document.getElementById("campaign-content").value.trim();
+  const selected = [...document.querySelectorAll(".campaign-target-check:checked")].map((x) => x.value);
+  if (!name) return toast("请填写活动名称");
+  if (!selected.length) return toast("请选择至少一家门店");
+  data.notifications = data.notifications || [];
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  data.notifications.unshift({ id: `notice-${Date.now()}`, name, content, stores: selected, date });
+  save();
+  closeModal();
+  render();
+  toast(`活动通知已发送至 ${selected.length} 家门店`);
 }
 function download() {
   const text =

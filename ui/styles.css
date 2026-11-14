@@ -1131,3 +1131,29 @@ body { background: #eef1f6; }
 .wechat-live h2 { margin: 0; }
 .live-dot { width: 10px; height: 10px; border-radius: 50%; background: #4a7ba6; box-shadow: 0 0 0 4px #4a7ba620; animation: livePulse 2s infinite; }
 @keyframes livePulse { 0%,100% { box-shadow: 0 0 0 3px #4a7ba620; } 50% { box-shadow: 0 0 0 7px #4a7ba610; } }
+
+/* ==== 2026-11-14 老板客户简卡、个人资料与活动通知 ==== */
+.boss-customer-card { position: relative; min-height: 168px; padding: 15px 16px; display: flex; flex-direction: column; gap: 10px; }
+.bc-head { display: flex; align-items: center; gap: 10px; }
+.bc-head .cc-avatar { width: 44px; height: 44px; border-radius: 12px; font-size: 15px; }
+.bc-head b { font-size: 18px; color: #2f3b4c; }
+.bc-baby { font-size: 16px; font-weight: 650; color: #55606e; }
+.bc-spend { font-size: 14px; color: #7b8794; line-height: 1.7; }
+.bc-spend b { color: #4a7ba6; font-size: 17px; }
+.bc-more { position: absolute; right: 15px; bottom: 13px; color: #4a7ba6; font-size: 14px; font-weight: 650; }
+
+.profile-summary { display: flex; align-items: center; gap: 15px; min-width: 0; }
+.profile-avatar { width: 62px; height: 62px; border-radius: 50%; display: inline-grid; place-items: center; overflow: hidden; background: #eaf1f8; border: 2px solid #cdd9e6; color: #4a7ba6; font-size: 25px; font-weight: 700; flex-shrink: 0; }
+.profile-avatar.large { width: 86px; height: 86px; font-size: 32px; }
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-menu { width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: #4a7ba6; font-size: 23px; letter-spacing: 2px; background: #eef3f9; }
+.profile-menu:hover { background: #4a7ba6; color: #fff; }
+.profile-edit-preview { display: flex; justify-content: center; margin: 6px 0 18px; }
+
+.notice-bell { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px; border-radius: 9px; background: #eaf1f8; border: 1px solid #d3e0ee; color: #4a7ba6; font-size: 13px; font-weight: 600; }
+.notice-bell svg { width: 19px; height: 19px; }
+.notice-bell.has-new { background: #fff0ee; border-color: #efc4bd; color: #c45b4b; }
+.notice-red-dot { position: absolute; right: -3px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: #df4f43; border: 2px solid #fff; }
+.notification-card { background: #f5f8fc; border: 1px solid #dde3ec; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+.notification-card h3 { margin: 0 0 7px; color: #2f3b4c; }
+.notification-card p { white-space: pre-wrap; line-height: 1.7; margin: 0 0 8px; }
