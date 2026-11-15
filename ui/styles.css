@@ -1157,3 +1157,52 @@ body { background: #eef1f6; }
 .notification-card { background: #f5f8fc; border: 1px solid #dde3ec; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
 .notification-card h3 { margin: 0 0 7px; color: #2f3b4c; }
 .notification-card p { white-space: pre-wrap; line-height: 1.7; margin: 0 0 8px; }
+
+/* ==== 2026-11-16 高级 UI 首页升级：仅视觉与信息层级 ==== */
+@font-face { font-family: KexuGeist; src: url('./assets/Geist-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+.home-content { --home-ink: #182a35; --home-blue: #32677f; --home-muted: #536976; }
+.home-content .hero-banner { min-height: 156px; border-radius: 22px; padding: 26px 30px; box-shadow: 0 16px 38px #234b6020; margin-bottom: 20px; }
+.home-content .hero-line { font-size: 27px; line-height: 1.35; letter-spacing: .01em; }
+.home-content .hero-sub { font-size: 15px; }
+.home-content .hero-dots { margin-top: 18px; }
+.home-content .mascot { width: 112px; height: 112px; }
+.home-content > .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+.home-content > .grid .metric { padding: 18px 20px; border: 1px solid #d6e1e5; border-radius: 16px; background: #fff; color: #536976; box-shadow: 0 5px 16px #18344208; }
+.home-content > .grid .metric b { color: #234b60; font-family: KexuGeist, "PingFang SC", sans-serif; font-size: 30px; letter-spacing: -.03em; margin-top: 8px; }
+.ai-shift-panel { background: #182f3d; color: #fff; border-radius: 20px; padding: 26px 28px; margin: 20px 0 22px; box-shadow: 0 16px 34px #182f3d1c; }
+.ai-shift-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.ai-shift-head h2 { font-size: 21px; color: #fff; margin: 0 0 6px; }
+.ai-shift-head p { color: #c1d2da; font-size: 13px; line-height: 1.7; margin: 0; }
+.ai-live { display: inline-flex; align-items: center; gap: 7px; color: #d6e6ed; font-size: 12px; white-space: nowrap; padding-top: 4px; }
+.ai-live i { width: 7px; height: 7px; border-radius: 50%; background: #8dc4aa; box-shadow: 0 0 0 4px #8dc4aa18; }
+.ai-flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 16px; margin-top: 24px; }
+.ai-flow-step { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.ai-flow-index { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #315568; color: #dcebf0; font-size: 12px; flex-shrink: 0; }
+.ai-flow-step b { font-size: 15px; color: #fff; }
+.ai-flow-step p { color: #b8ccd5; font-size: 12px; line-height: 1.65; margin-top: 4px; }
+.ai-flow-arrow { color: #6f94a5; font-size: 19px; }
+.home-campaign-button { margin: 2px 0 18px; background: #32677f !important; border-color: #32677f; box-shadow: 0 8px 20px #234b601c; }
+.home-campaign-button:hover { background: #234b60 !important; }
+.home-work-card { border-color: #d6e1e5; border-radius: 18px; box-shadow: 0 6px 22px #1834420a; }
+.home-work-card > h2 { color: #182a35; font-size: 20px; margin-bottom: 14px; }
+.home-content .employee-trend-card { border-color: #d6e1e5; box-shadow: 0 6px 22px #1834420a; }
+.mobile .home-content .hero-banner { min-height: 136px; padding: 22px 22px; }
+.mobile .home-content .hero-line { font-size: 22px; }
+.mobile .home-content .mascot { width: 88px; height: 88px; }
+.mobile .home-content > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.mobile .home-content > .grid .metric { padding: 15px 16px; font-size: 13px; }
+.mobile .home-content > .grid .metric b { font-size: 26px; }
+.mobile .ai-shift-panel { padding: 22px 20px; border-radius: 18px; }
+.mobile .ai-shift-head { flex-direction: column; gap: 8px; }
+.mobile .ai-shift-head h2 { font-size: 19px; }
+.mobile .ai-flow { grid-template-columns: 1fr; gap: 13px; margin-top: 20px; }
+.mobile .ai-flow-arrow { transform: rotate(90deg); margin-left: 5px; height: 16px; }
+.site-link { margin-left: auto; color: #32677f; font-size: 13px; font-weight: 650; border-bottom: 1px solid #b9cdd6; padding-bottom: 2px; }
+
+/* 首页首轮实测修正：手机流程更紧凑，标题统一墨色 */
+.greeting-line { color: #182a35; }
+.mobile .ai-flow-arrow { display: none; }
+.mobile .ai-flow { gap: 0; }
+.mobile .ai-flow-step { padding: 13px 0; border-top: 1px solid #315568; }
+.mobile .ai-flow-step:first-child { border-top: 0; padding-top: 0; }
+.mobile .ai-flow-step:last-child { padding-bottom: 0; }

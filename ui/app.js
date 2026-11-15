@@ -288,10 +288,10 @@ function employeeHomeLineChart() {
   });
   const line = points.map((p, i) => `${i ? "L" : "M"}${p.px.toFixed(1)},${p.py.toFixed(1)}`).join(" ");
   const area = `${line} L${points[points.length - 1].px},${bottom} L${points[0].px},${bottom} Z`;
-  const svg = `<svg class="home-line-chart" viewBox="0 0 480 224" role="img" aria-label="近七日销售额折线图，七日合计${total}元"><defs><linearGradient id="homeLineFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8fbb6d" stop-opacity=".28"/><stop offset="100%" stop-color="#8fbb6d" stop-opacity="0"/></linearGradient></defs>${[0, 1, 2].map((i) => {
+  const svg = `<svg class="home-line-chart" viewBox="0 0 480 224" role="img" aria-label="近七日销售额折线图，七日合计${total}元"><defs><linearGradient id="homeLineFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5b8ba0" stop-opacity=".28"/><stop offset="100%" stop-color="#5b8ba0" stop-opacity="0"/></linearGradient></defs>${[0, 1, 2].map((i) => {
     const y = top + ((bottom - top) / 2) * i;
     return `<line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#e3ebdd" stroke-dasharray="${i === 2 ? "0" : "4 5"}"/>`;
-  }).join("")}<path d="${area}" fill="url(#homeLineFill)"/><path d="${line}" fill="none" stroke="#6f9d4f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${points.map((p) => `<g><circle cx="${p.px}" cy="${p.py}" r="4" fill="#fff" stroke="#6f9d4f" stroke-width="2"><title>${p.date}：${p.sales} 元</title></circle><text x="${p.px}" y="${p.py - 10}" text-anchor="middle" fill="#557b46" font-size="12">${p.sales}</text><text x="${p.px}" y="204" text-anchor="middle" fill="#7b8974" font-size="12">${p.date}</text></g>`).join("")}</svg>`;
+  }).join("")}<path d="${area}" fill="url(#homeLineFill)"/><path d="${line}" fill="none" stroke="#315f74" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${points.map((p) => `<g><circle cx="${p.px}" cy="${p.py}" r="4" fill="#fff" stroke="#315f74" stroke-width="2"><title>${p.date}：${p.sales} 元</title></circle><text x="${p.px}" y="${p.py - 10}" text-anchor="middle" fill="#557b46" font-size="12">${p.sales}</text><text x="${p.px}" y="204" text-anchor="middle" fill="#627b87" font-size="12">${p.date}</text></g>`).join("")}</svg>`;
   return `<section class="card employee-trend-card"><div class="trend-card-heading"><h2>本店近七日销售额</h2></div><div class="trend-total">¥ ${total.toLocaleString()}<span>七日合计</span></div>${svg}</section>`;
 }
 function editEmployeeStore() {
@@ -342,13 +342,13 @@ function employeeBarChart(key, title, unit, rows = employeeWeeklyDemo) {
   const formatter = (n) => Number(n).toLocaleString("zh-CN");
   const plot = { left: 64, right: 466, top: 38, bottom: 224 };
   const width = (plot.right - plot.left) / 7;
-  const svg = `<svg class="weekly-chart" viewBox="0 0 480 274" role="img" aria-label="${title}柱状图，${rows.map((x) => x.date + "：" + formatter(x[key]) + unit).join("；")}"><text x="5" y="18" fill="#7b8974" font-size="17">${unit}</text>${[
+  const svg = `<svg class="weekly-chart" viewBox="0 0 480 274" role="img" aria-label="${title}柱状图，${rows.map((x) => x.date + "：" + formatter(x[key]) + unit).join("；")}"><text x="5" y="18" fill="#627b87" font-size="17">${unit}</text>${[
     0, 1, 2, 3,
   ]
     .map((i) => {
       const v = (maximum * i) / 3;
       const y = plot.bottom - ((plot.bottom - plot.top) * i) / 3;
-      return `<line x1="${plot.left}" y1="${y}" x2="${plot.right}" y2="${y}" stroke="#e7ede2" stroke-dasharray="${i ? "4 5" : "0"}"/><text x="${plot.left - 10}" y="${y + 6}" fill="#7b8974" font-size="17" text-anchor="end">${Math.round(v).toLocaleString()}</text>`;
+      return `<line x1="${plot.left}" y1="${y}" x2="${plot.right}" y2="${y}" stroke="#e7ede2" stroke-dasharray="${i ? "4 5" : "0"}"/><text x="${plot.left - 10}" y="${y + 6}" fill="#627b87" font-size="17" text-anchor="end">${Math.round(v).toLocaleString()}</text>`;
     })
     .join("")}${rows
     .map((row, i) => {
@@ -356,7 +356,7 @@ function employeeBarChart(key, title, unit, rows = employeeWeeklyDemo) {
       const height = (v / maximum) * (plot.bottom - plot.top);
       const x = plot.left + i * width + width * 0.22;
       const y = plot.bottom - height;
-      return `<g><rect tabindex="0" role="img" aria-label="${row.date} ${formatter(v)}${unit}" class="weekly-bar ${key === "customers" ? "customer-growth-bar" : ""}" x="${x}" y="${y}" width="${width * 0.56}" height="${height}" rx="5"><title>${row.date}：${formatter(v)}${unit}</title></rect><text x="${x + width * 0.28}" y="${y - 9}" text-anchor="middle" fill="#3f5a35" font-size="17">${formatter(v)}</text><text x="${x + width * 0.28}" y="253" text-anchor="middle" fill="#7b8974" font-size="17">${row.date}</text></g>`;
+      return `<g><rect tabindex="0" role="img" aria-label="${row.date} ${formatter(v)}${unit}" class="weekly-bar ${key === "customers" ? "customer-growth-bar" : ""}" x="${x}" y="${y}" width="${width * 0.56}" height="${height}" rx="5"><title>${row.date}：${formatter(v)}${unit}</title></rect><text x="${x + width * 0.28}" y="${y - 9}" text-anchor="middle" fill="#315f74" font-size="17">${formatter(v)}</text><text x="${x + width * 0.28}" y="253" text-anchor="middle" fill="#627b87" font-size="17">${row.date}</text></g>`;
     })
     .join("")}</svg>`;
   return `<section class="card employee-trend-card"><div class="trend-card-heading"><h2>${title}</h2></div><div class="trend-total">${key === "sales" ? "¥ " : ""}${formatter(total)}<span>${key === "sales" ? "七日合计" : "人 · 七日新增"}</span></div>${svg}<details class="trend-data"><summary>查看每日数据</summary><table><thead><tr><th>日期</th><th>${key === "sales" ? "销售额（元）" : "新增客户（人）"}</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${x.date}</td><td>${formatter(x[key])}</td></tr>`).join("")}</tbody></table></details></section>`;
@@ -390,6 +390,13 @@ function heroBanner() {
   }
   const slide = heroSlides[heroIndex];
   return `<section class="hero-banner" id="hero-banner" style="background:${slide.bg}"><div class="hero-text"><div class="hero-line">${slide.text}</div><div class="hero-sub">${slide.sub}</div><div class="hero-dots">${heroSlides.map((_, i) => `<span class="hero-dot ${i === heroIndex ? "on" : ""}"></span>`).join("")}</div></div>${mascotSvg()}</section>`;
+}
+function aiShiftPanel() {
+  const boss = configs[role].boss;
+  const steps = boss
+    ? [["AI 接待", "读取客户档案与门店知识"], ["导购把关", "拿不准的交给人工确认"], ["经营回流", "你直接查看今天的结果"]]
+    : [["客户提问", "自动识别宝宝月龄与需求"], ["AI 准备", "从知识库找到有依据的回答"], ["你来确认", "重要回复由导购决定是否发送"]];
+  return `<section class="ai-shift-panel"><div class="ai-shift-head"><div><h2>${boss ? "AI 员工正在替你完成工作" : "AI 帮你接待，你来把关"}</h2><p>${boss ? "不用盯每一条消息，重点看需要人工处理的事和最后的经营结果。" : "重复问题交给 AI，关键服务仍由你决定。"}</p></div><span class="ai-live"><i></i>工作流程已就绪</span></div><div class="ai-flow">${steps.map((step, i) => `<div class="ai-flow-step"><span class="ai-flow-index">${i + 1}</span><div><b>${step[0]}</b><p>${step[1]}</p></div></div>`).join('<span class="ai-flow-arrow" aria-hidden="true">→</span>')}</div></section>`;
 }
 function metrics() {
   return `<div class="grid">${(configs[role].boss
@@ -428,7 +435,7 @@ function customerListCard(x, i) {
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `${heroBanner()}${!c.boss && c.mobile ? employeeStoreCard() : ""}${metrics()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? "<br>" + employeeHomeLineChart() : ""}<br><button class="primary" onclick="campaign()">＋ 创建新活动</button><div class="card" style="margin-top:16px"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div>`;
+    return `<div class="home-content ${c.boss ? "boss-home" : "staff-home"}">${!c.boss && c.mobile ? employeeStoreCard() : ""}${heroBanner()}${metrics()}${aiShiftPanel()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? employeeHomeLineChart() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button><div class="card home-work-card"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div></div>`;
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))
