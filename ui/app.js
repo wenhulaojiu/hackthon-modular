@@ -432,10 +432,18 @@ function customerListCard(x, i) {
   }
   return `<div class="card customer searchable customer-card-v2" onclick="detail(${i})"><div class="cc-head"><div class="avatar cc-avatar">${esc(x.name.slice(-2))}</div><div class="cc-id"><b class="cc-name">${esc(x.name)}</b><div class="cc-contact">微信：${esc(x.wechat || "未填写")}<br>电话：${esc(x.phone || "未填写")}</div></div></div><div class="cc-baby">${esc(x.baby)}<span class="cc-stage">${esc(stageText(x.stage) || "时期未设置")}</span></div><p class="cc-note">${esc(x.note)}</p><div class="cc-store">${esc(x.store || "未填写门店")} · 累计消费 <b>¥ ${Number(x.amount || 0).toLocaleString()}</b></div><div class="cc-foot"><span class="cc-time">最近联系：${esc((x.lastContact || "未记录").replace("T", " "))}<br>下次联系：${esc((x.nextContact || "未安排").replace("T", " "))}</span><span class="cc-more">查看档案 →</span></div></div>`;
 }
+function webHomeSidebar() {
+  const boss = configs[role].boss;
+  const links = boss ? ["门店信息", "客户信息", "知识库"] : ["微信数据", "自动回复", "知识库"];
+  return `<aside class="web-home-sidebar"><section class="web-side-card"><div class="web-side-heading"><h2>今日要做的事</h2><span>${data.tasks.filter((t) => !t.done).length} 项未完成</span></div><div class="web-side-tasks">${tasks()}</div></section><section class="web-side-card web-quick-card"><h2>常用入口</h2>${links.map((p) => `<button onclick="go('${p}')"><span>${p}</span><span aria-hidden="true">→</span></button>`).join("")}</section></aside>`;
+}
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `<div class="home-content ${c.boss ? "boss-home" : "staff-home"}">${!c.boss && c.mobile ? employeeStoreCard() : ""}${heroBanner()}${metrics()}${aiShiftPanel()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? employeeHomeLineChart() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button><div class="card home-work-card"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div></div>`;
+    if (["首页", "总览"].includes(page)) {
+    if (!c.mobile) return `<div class="home-content web-home ${c.boss ? "boss-home" : "staff-home"}">${heroBanner()}${metrics()}<div class="web-home-grid"><div class="web-home-primary">${aiShiftPanel()}${role === 3 ? employeeTrendCharts() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button>${c.boss ? `<div class="card home-work-card"><h2>近 7 天经营趋势</h2>${bossSalesTrend()}</div>` : ""}</div>${webHomeSidebar()}</div></div>`;
+    return `<div class="home-content ${c.boss ? "boss-home" : "staff-home"}">${!c.boss ? employeeStoreCard() : ""}${heroBanner()}${metrics()}${aiShiftPanel()}${role === 1 ? employeeHomeLineChart() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button><div class="card home-work-card"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div></div>`;
+  }
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))

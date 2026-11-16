@@ -1215,6 +1215,45 @@ body { background: #eef1f6; }
 .mobile .ai-flow-step:first-child { border-top: 0; padding-top: 0; }
 .mobile .ai-flow-step:last-child { padding-bottom: 0; }
 
+/* ==== PC 首页参考淘宝后台：浅色工作台、中央主区与右侧待办 ==== */
+.shell:not(.mobile) { background: #f3f7fa; }
+.shell:not(.mobile) > .sidebar { background: #f7fafc; border-right: 1px solid #dbe5eb; }
+.shell:not(.mobile) > .sidebar b { color: #182a35; letter-spacing: .06em; }
+.shell:not(.mobile) .sidebar button { border-radius: 9px; }
+.shell:not(.mobile) > .main { background: #f3f7fa; }
+.web-home .hero-banner { min-height: 112px; padding: 20px 26px; border-radius: 16px; margin-bottom: 16px; box-shadow: 0 8px 24px #234b6018; }
+.web-home .hero-line { font-size: 24px; }
+.web-home .hero-sub { font-size: 14px; margin-top: 4px; }
+.web-home .hero-dots { margin-top: 12px; }
+.web-home .mascot { width: 88px; height: 88px; }
+.web-home > .grid { gap: 12px; margin-bottom: 16px; }
+.web-home > .grid .metric { border-radius: 12px; padding: 15px 18px; }
+.web-home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; align-items: start; }
+.web-home-primary { min-width: 0; }
+.web-home .ai-shift-panel { border-radius: 14px; padding: 22px 24px; margin: 0 0 16px; box-shadow: 0 8px 22px #182f3d16; }
+.web-home .ai-shift-head h2 { font-size: 19px; }
+.web-home .ai-flow { margin-top: 18px; }
+.web-home .home-work-card { border-radius: 14px; }
+.web-home .employee-trends { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.web-home .employee-trend-card { border-radius: 14px; min-width: 0; }
+.web-home-sidebar { display: flex; flex-direction: column; gap: 14px; }
+.web-side-card { background: #fff; border: 1px solid #dbe5eb; border-radius: 14px; padding: 18px; box-shadow: 0 5px 16px #18344208; }
+.web-side-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.web-side-heading h2, .web-quick-card h2 { font-size: 17px; margin: 0; }
+.web-side-heading span { color: #32677f; font-size: 12px; white-space: nowrap; }
+.web-side-tasks .todo-text { font-size: 14px; line-height: 1.6; }
+.web-side-tasks .todo-row { padding: 12px 0; }
+.web-side-tasks .todo-check { width: 24px; height: 24px; }
+.web-quick-card button { display: flex; align-items: center; justify-content: space-between; width: 100%; border: 0; border-top: 1px solid #e5edf1; border-radius: 0; padding: 13px 2px; color: #32677f; background: transparent; }
+.web-quick-card button:hover { background: #f1f6f9; padding-left: 8px; }
+@media(max-width:1050px){.web-home-grid{grid-template-columns:minmax(0,1fr)}.web-home-sidebar{display:grid;grid-template-columns:1fr 1fr}.web-home .employee-trends{grid-template-columns:1fr}}
+
+/* 图表与首页导航同步新版青蓝 */
+.weekly-bar { fill: #5b8ba0; }
+.weekly-bar.customer-growth-bar { fill: #a9c6d4; }
+.weekly-bar:hover, .weekly-bar:focus { fill: #32677f; }
+.nav-0 { --navc: #32677f; --navs: #e8f1f5; }
+
 #roles, body > header, body > .hint { display:none!important; }
 </style>
 </head>
@@ -1665,10 +1704,18 @@ function customerListCard(x, i) {
   }
   return `<div class="card customer searchable customer-card-v2" onclick="detail(${i})"><div class="cc-head"><div class="avatar cc-avatar">${esc(x.name.slice(-2))}</div><div class="cc-id"><b class="cc-name">${esc(x.name)}</b><div class="cc-contact">微信：${esc(x.wechat || "未填写")}<br>电话：${esc(x.phone || "未填写")}</div></div></div><div class="cc-baby">${esc(x.baby)}<span class="cc-stage">${esc(stageText(x.stage) || "时期未设置")}</span></div><p class="cc-note">${esc(x.note)}</p><div class="cc-store">${esc(x.store || "未填写门店")} · 累计消费 <b>¥ ${Number(x.amount || 0).toLocaleString()}</b></div><div class="cc-foot"><span class="cc-time">最近联系：${esc((x.lastContact || "未记录").replace("T", " "))}<br>下次联系：${esc((x.nextContact || "未安排").replace("T", " "))}</span><span class="cc-more">查看档案 →</span></div></div>`;
 }
+function webHomeSidebar() {
+  const boss = configs[role].boss;
+  const links = boss ? ["门店信息", "客户信息", "知识库"] : ["微信数据", "自动回复", "知识库"];
+  return `<aside class="web-home-sidebar"><section class="web-side-card"><div class="web-side-heading"><h2>今日要做的事</h2><span>${data.tasks.filter((t) => !t.done).length} 项未完成</span></div><div class="web-side-tasks">${tasks()}</div></section><section class="web-side-card web-quick-card"><h2>常用入口</h2>${links.map((p) => `<button onclick="go('${p}')"><span>${p}</span><span aria-hidden="true">→</span></button>`).join("")}</section></aside>`;
+}
 function content() {
   const c = configs[role];
   if (["首页", "总览"].includes(page))
-    return `<div class="home-content ${c.boss ? "boss-home" : "staff-home"}">${!c.boss && c.mobile ? employeeStoreCard() : ""}${heroBanner()}${metrics()}${aiShiftPanel()}${role === 3 ? employeeTrendCharts() : ""}${role === 1 ? employeeHomeLineChart() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button><div class="card home-work-card"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div></div>`;
+    if (["首页", "总览"].includes(page)) {
+    if (!c.mobile) return `<div class="home-content web-home ${c.boss ? "boss-home" : "staff-home"}">${heroBanner()}${metrics()}<div class="web-home-grid"><div class="web-home-primary">${aiShiftPanel()}${role === 3 ? employeeTrendCharts() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button>${c.boss ? `<div class="card home-work-card"><h2>近 7 天经营趋势</h2>${bossSalesTrend()}</div>` : ""}</div>${webHomeSidebar()}</div></div>`;
+    return `<div class="home-content ${c.boss ? "boss-home" : "staff-home"}">${!c.boss ? employeeStoreCard() : ""}${heroBanner()}${metrics()}${aiShiftPanel()}${role === 1 ? employeeHomeLineChart() : ""}<button class="primary home-campaign-button" onclick="campaign()">＋ 创建新活动</button><div class="card home-work-card"><h2>${c.boss ? "近 7 天经营趋势" : "今日要做的事"}</h2>${c.boss ? bossSalesTrend() : tasks()}</div></div>`;
+  }
   if (page === "门店信息") return storePage();
   if (employeeCustomersVisible()) return employeeCustomerPage();
   if (["顾客信息", "客户信息"].includes(page))
